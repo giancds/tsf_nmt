@@ -6,6 +6,8 @@ by [Jean et al. (2015)](http://arxiv.org/abs/1412.2007) using TensorFlow.
 I'm heavily relying on Tensorflow's seq2seq interfaces to construct the model while adding the 
 bidirectional encoder.
 
+This is a work in progress and currently is cannot be used to train any models.
+
 ###### Dependencies (so far):
 
 * [TensorFlow](http://tensorflow.org/)

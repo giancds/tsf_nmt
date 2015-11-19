@@ -144,8 +144,8 @@ class NMTModel(object):
             self.decoder_cell = rnn_cell.LSTMCell(decoder_size, input_size=self.target_proj_size)
 
         # The seq2seq function: we use embedding for the input and attention.
-        def seq2seq_f(encoder_inputs, decoder_inputs, do_decode):
-            return self.inference(encoder_inputs, decoder_inputs, do_decode)
+        def seq2seq_f(encoder_inputs, encoder_inputs_r, decoder_inputs, do_decode):
+            return self.inference(encoder_inputs, encoder_inputs_r, decoder_inputs, do_decode)
             # return seq2seq.embedding_attention_seq2seq(
             #     encoder_inputs, decoder_inputs, cell, source_vocab_size,
             #     target_vocab_size, output_projection=output_projection,
@@ -173,7 +173,7 @@ class NMTModel(object):
             self.outputs, self.losses = seq2seq.model_with_buckets(
                 self.encoder_inputs, self.decoder_inputs, targets,
                 self.target_weights, buckets, self.target_vocab_size,
-                lambda x, y: seq2seq_f(x, y, True),
+                lambda x, xr, y: seq2seq_f(x, x_r, y, True),
                 softmax_loss_function=softmax_loss_function)
             # If we use output projection, we need to project outputs for decoding.
             if self.output_projection is not None:
@@ -185,7 +185,7 @@ class NMTModel(object):
             self.outputs, self.losses = seq2seq.model_with_buckets(
                 self.encoder_inputs, self.decoder_inputs, targets,
                 self.target_weights, buckets, self.target_vocab_size,
-                lambda x, y: seq2seq_f(x, y, False),
+                lambda x, xr, y: seq2seq_f(x, x_r, y, False),
                 softmax_loss_function=softmax_loss_function)
 
         # Gradients and SGD update operation for training the model.
@@ -324,7 +324,7 @@ class NMTModel(object):
             batch_weights.append(batch_weight)
         return batch_encoder_inputs, batch_decoder_inputs, batch_weights
 
-    def inference(self, source, target, do_decode=False):
+    def inference(self, source, source_r, target, do_decode=False):
         """
         Function to be used together with the 'model_with_buckets' function from Tensorflow's
             seq2seq module.
@@ -333,6 +333,8 @@ class NMTModel(object):
         ----------
         source: Tensor
             a Tensor corresponding to the source sentence
+        source_r: Tensor
+            a Tensor corresponding to the reversed source sentence
         target: Tensor
             A Tensor corresponding to the target sentence
         do_decode: boolean
@@ -345,7 +347,7 @@ class NMTModel(object):
         """
         # encoder embedding layer and bi-directional recurrent layer
         with tf.name_scope('bidirectional_encoder') as scope:
-            context, decoder_initial_state = self._bidirectional_encoder(source)
+            context, decoder_initial_state = self._bidirectional_encoder(source, source_r)
 
         # decoder with attention
         with tf.name_scope('decoder_with_attention') as scope:
@@ -368,12 +370,12 @@ class NMTModel(object):
                 target, decoder_initial_state, attention_states,
                 self.decoder_cell, self.target_vocab_size, num_heads=1,
                 output_size=None, output_projection=self.output_projection,
-                feed_previous=do_decode, dtype=self.dtype, scope=scope
+                feed_previous=do_decode, dtype=self.dtype, scope='decoder_with_attention'
             )
 
         return outputs, states
 
-    def _bidirectional_encoder(self, source):
+    def _bidirectional_encoder(self, source, source_r):
         """
 
         Parameters
@@ -384,7 +386,7 @@ class NMTModel(object):
         -------
 
         """
-        source_r = [tf.reverse(s, [False, True]) for s in source]
+        # source_r = [tf.reverse(s, [False, True]) for s in source]
 
         src_embedding = tf.Variable(
             tf.truncated_normal(

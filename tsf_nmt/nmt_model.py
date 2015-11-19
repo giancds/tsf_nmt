@@ -48,18 +48,19 @@ class GRU(RNNCell):
 
 
 class NMTModel(object):
-    """Sequence-to-sequence model with attention and for multiple buckets.
+    """Neural Machine Translation model with attention and for multiple buckets.
 
-    This class implements a multi-layer recurrent neural network as encoder,
-    and an attention-based decoder. This is the same as the model described in
-    this paper: http://arxiv.org/abs/1412.7449 - please look there for details,
-    or into the seq2seq library for complete model implementation.
+    This class implements single-layer or multi-layer bi-directional recurrent neural
+    network as encoder, and an attention-based decoder. This is the same as the model
+    described in this paper: arxiv.org/abs/1412.2007 - please look there for details,
+    or into the seq2seq library for some function implementations.
+
     This class also allows to use GRU cells in addition to LSTM cells, and
-    sampled softmax to handle large output vocabulary size. A single-layer
-    version of this model, but with bi-directional encoder, was presented in
+    sampled softmax to handle large output vocabulary size.
+
+    A single-layer version of this model, but with bi-directional encoder, was presented in
       http://arxiv.org/abs/1409.0473
-    and sampled softmax is described in Section 3 of the following paper.
-      http://arxiv.org/pdf/1412.2007v2.pdf
+
     """
 
     def __init__(self,

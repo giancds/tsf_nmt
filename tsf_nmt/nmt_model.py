@@ -9,42 +9,9 @@
 import random
 import numpy as np
 import tensorflow as tf
-from tensorflow.models.rnn import linear, rnn, rnn_cell, seq2seq
-from tensorflow.models.rnn.rnn_cell import RNNCell
+from tensorflow.models.rnn import rnn_cell, seq2seq
 import data_utils
-
-
-class GRU(RNNCell):
-    """Gated Recurrent Unit cell (cf. http://arxiv.org/abs/1406.1078)."""
-
-    def __init__(self, input_size, num_units):
-        self._num_units = num_units
-        self._input_size = input_size
-
-    @property
-    def input_size(self):
-        return self._input_size
-
-    @property
-    def output_size(self):
-        return self._num_units
-
-    @property
-    def state_size(self):
-        return self._num_units
-
-    def __call__(self, inputs, state, scope=None):
-        """Gated recurrent unit (GRU) with nunits cells."""
-        with tf.variable_scope(scope or type(self).__name__):  # "GRUCell"
-            with tf.variable_scope("Gates"):  # Reset gate and update gate.
-                # We start with bias of 1.0 to not reset and not udpate.
-                r, u = tf.split(1, 2, linear.linear([inputs, state],
-                                                    2 * self._num_units, True, 1.0))
-                r, u = tf.sigmoid(r), tf.sigmoid(u)
-            with tf.variable_scope("Candidate"):
-                c = tf.tanh(linear.linear([inputs, r * state], self._num_units, True))
-            new_h = u * state + (1 - u) * c
-        return new_h, new_h
+import nmt
 
 
 class NMTModel(object):
@@ -76,6 +43,7 @@ class NMTModel(object):
                  batch_size,
                  learning_rate,
                  learning_rate_decay_factor,
+                 optimizer='sgd',
                  use_lstm=False,
                  num_samples=512,
                  forward_only=False,
@@ -121,7 +89,7 @@ class NMTModel(object):
         self.output_projection = None
         softmax_loss_function = None
         # Sampled softmax only makes sense if we sample less than vocabulary size.
-        if num_samples > 0 and num_samples < self.target_vocab_size:
+        if 0 < num_samples < self.target_vocab_size:
             with tf.device("/cpu:0"):
                 w = tf.get_variable("proj_w", [encoder_size, self.target_vocab_size])
                 w_t = tf.transpose(w)
@@ -137,30 +105,35 @@ class NMTModel(object):
             softmax_loss_function = sampled_loss
 
         # Create the internal multi-layer cell for our RNN.
-        self.encoder_cell = GRU(self.source_proj_size, encoder_size)
-        self.decoder_cell = GRU(self.target_proj_size, decoder_size)
+        self.encoder_cell = nmt.GRU(self.source_proj_size, encoder_size)
+        self.encoder_cell_r = nmt.GRU(self.source_proj_size, encoder_size)
+        self.decoder_cell = nmt.GRU(self.target_proj_size, decoder_size)
         if use_lstm:
             self.encoder_cell = rnn_cell.LSTMCell(encoder_size, input_size=self.source_proj_size)
+            self.encoder_cell_r = rnn_cell.LSTMCell(encoder_size, input_size=self.source_proj_size)
             self.decoder_cell = rnn_cell.LSTMCell(decoder_size, input_size=self.target_proj_size)
 
         # The seq2seq function: we use embedding for the input and attention.
         def seq2seq_f(encoder_inputs, encoder_inputs_r, decoder_inputs, do_decode):
             return self.inference(encoder_inputs, encoder_inputs_r, decoder_inputs, do_decode)
-            # return seq2seq.embedding_attention_seq2seq(
-            #     encoder_inputs, decoder_inputs, cell, source_vocab_size,
-            #     target_vocab_size, output_projection=output_projection,
-            #     feed_previous=do_decode)
 
         # Feeds for inputs.
         self.encoder_inputs = []
+        self.encoder_inputs_r = []
         self.decoder_inputs = []
         self.target_weights = []
+
         for i in xrange(buckets[-1][0]):  # Last bucket is the biggest one.
             self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                       name="encoder{0}".format(i)))
+
+            self.encoder_inputs_r.append(tf.placeholder(tf.int32, shape=[None],
+                                                        name="encoder_r{0}".format(i)))
+
         for i in xrange(buckets[-1][1] + 1):
             self.decoder_inputs.append(tf.placeholder(tf.int32, shape=[None],
                                                       name="decoder{0}".format(i)))
+
             self.target_weights.append(tf.placeholder(tf.float32, shape=[None],
                                                       name="weight{0}".format(i)))
 
@@ -170,10 +143,10 @@ class NMTModel(object):
 
         # Training outputs and losses.
         if forward_only:
-            self.outputs, self.losses = seq2seq.model_with_buckets(
-                self.encoder_inputs, self.decoder_inputs, targets,
-                self.target_weights, buckets, self.target_vocab_size,
-                lambda x, xr, y: seq2seq_f(x, x_r, y, True),
+            self.outputs, self.losses = nmt.bidirectional_model_with_buckets(
+                self.encoder_inputs, self.encoder_inputs_r, self.decoder_inputs,
+                targets, self.target_weights, buckets, self.target_vocab_size,
+                lambda x, xr, y: seq2seq_f(x, xr, y, True),
                 softmax_loss_function=softmax_loss_function)
             # If we use output projection, we need to project outputs for decoding.
             if self.output_projection is not None:
@@ -182,10 +155,10 @@ class NMTModel(object):
                                                        self.output_projection[1])
                                        for output in self.outputs[b]]
         else:
-            self.outputs, self.losses = seq2seq.model_with_buckets(
-                self.encoder_inputs, self.decoder_inputs, targets,
-                self.target_weights, buckets, self.target_vocab_size,
-                lambda x, xr, y: seq2seq_f(x, x_r, y, False),
+            self.outputs, self.losses = nmt.bidirectional_model_with_buckets(
+                self.encoder_inputs, self.encoder_inputs_r, self.decoder_inputs,
+                targets, self.target_weights, buckets, self.target_vocab_size,
+                lambda x, xr, y: seq2seq_f(x, xr, y, False),
                 softmax_loss_function=softmax_loss_function)
 
         # Gradients and SGD update operation for training the model.
@@ -193,7 +166,8 @@ class NMTModel(object):
         if not forward_only:
             self.gradient_norms = []
             self.updates = []
-            opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+            # opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+            opt = self._get_optimizer(optimizer, learning_rate)
             for b in xrange(len(buckets)):
                 gradients = tf.gradients(self.losses[b], params)
                 clipped_gradients, norm = tf.clip_by_global_norm(gradients,
@@ -204,13 +178,40 @@ class NMTModel(object):
 
         self.saver = tf.train.Saver(tf.all_variables())
 
-    def step(self, session, encoder_inputs, decoder_inputs, target_weights,
+    def _get_optimizer(self, name='sgd', lr_rate=0.1, decay=1e-4):
+        """
+
+        Parameters
+        ----------
+        name
+        lr_rate
+        decay
+
+        Returns
+        -------
+
+        """
+        optimizer = None
+        if name is 'sgd':
+            optimizer = tf.train.GradientDescentOptimizer(lr_rate)
+        elif name is 'adagrad':
+            optimizer = tf.train.AdagradOptimizer(lr_rate)
+        elif name is 'adam':
+            optimizer = tf.train.AdamOptimizer(lr_rate)
+        elif name is 'rmsprop':
+            optimizer = tf.train.RMSPropOptimizer(lr_rate, decay)
+        else:
+            raise ValueError('Optimizer not found.')
+        return optimizer
+
+    def step(self, session, encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights,
              bucket_id, forward_only):
         """Run a step of the model feeding the given inputs.
 
         Args:
           session: tensorflow session to use.
           encoder_inputs: list of numpy int vectors to feed as encoder inputs.
+          encoder_inputs_r: list of numpy int vectors to feed as encoder inputs (reversed sentence).
           decoder_inputs: list of numpy int vectors to feed as decoder inputs.
           target_weights: list of numpy float vectors to feed as target weights.
           bucket_id: which bucket of the model to use.
@@ -240,6 +241,8 @@ class NMTModel(object):
         input_feed = {}
         for l in xrange(encoder_size):
             input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+        for l in xrange(encoder_size):
+            input_feed[self.encoder_inputs_r[l].name] = encoder_inputs_r[l]
         for l in xrange(decoder_size):
             input_feed[self.decoder_inputs[l].name] = decoder_inputs[l]
             input_feed[self.target_weights[l].name] = target_weights[l]
@@ -281,16 +284,19 @@ class NMTModel(object):
           the constructed batch that has the proper format to call step(...) later.
         """
         encoder_size, decoder_size = self.buckets[bucket_id]
-        encoder_inputs, decoder_inputs = [], []
+        encoder_inputs, encoder_inputs_r, decoder_inputs = [], [], []
 
         # Get a random batch of encoder and decoder inputs from data,
         # pad them if needed, reverse encoder inputs and add GO to decoder.
         for _ in xrange(self.batch_size):
-            encoder_input, decoder_input = random.choice(data[bucket_id])
+            d = data[bucket_id]
+            encoder_input, encoder_input_r, decoder_input = random.choice(d)
 
             # Encoder inputs are padded and then reversed.
             encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
-            encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+            encoder_pad_r = [data_utils.PAD_ID] * (encoder_size - len(encoder_input_r))
+            encoder_inputs.append(list(encoder_input + encoder_pad))
+            encoder_inputs_r.append(list(encoder_input_r + encoder_pad_r))
 
             # Decoder inputs get an extra "GO" symbol, and are padded then.
             decoder_pad_size = decoder_size - len(decoder_input) - 1
@@ -298,13 +304,17 @@ class NMTModel(object):
                                   [data_utils.PAD_ID] * decoder_pad_size)
 
         # Now we create batch-major vectors from the data selected above.
-        batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
+        batch_encoder_inputs, batch_encoder_inputs_r, \
+            batch_decoder_inputs, batch_weights = [], [], [], []
 
         # Batch encoder inputs are just re-indexed encoder_inputs.
         for length_idx in xrange(encoder_size):
             batch_encoder_inputs.append(
                 np.array([encoder_inputs[batch_idx][length_idx]
                           for batch_idx in xrange(self.batch_size)], dtype=np.int32))
+            batch_encoder_inputs_r.append(
+                np.array([encoder_inputs_r[batch_r_idx][length_idx]
+                          for batch_r_idx in xrange(self.batch_size)], dtype=np.int32))
 
         # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
         for length_idx in xrange(decoder_size):
@@ -322,7 +332,7 @@ class NMTModel(object):
                 if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
                     batch_weight[batch_idx] = 0.0
             batch_weights.append(batch_weight)
-        return batch_encoder_inputs, batch_decoder_inputs, batch_weights
+        return batch_encoder_inputs, batch_encoder_inputs_r, batch_decoder_inputs, batch_weights
 
     def inference(self, source, source_r, target, do_decode=False):
         """
@@ -347,7 +357,11 @@ class NMTModel(object):
         """
         # encoder embedding layer and bi-directional recurrent layer
         with tf.name_scope('bidirectional_encoder') as scope:
-            context, decoder_initial_state = self._bidirectional_encoder(source, source_r)
+            context, decoder_initial_state = nmt.bidirectional_encoder(
+                source, source_r, self.source_vocab_size, self.source_proj_size,
+                self.encoder_cell, self.encoder_cell_r, self.encoder_size,
+                self.batch_size, dtype=self.dtype
+            )
 
         # decoder with attention
         with tf.name_scope('decoder_with_attention') as scope:
@@ -361,9 +375,14 @@ class NMTModel(object):
 
             # First calculate a concatenation of encoder outputs to put attention on.
             top_states = [
-                tf.reshape(e, [-1, 1, self.source_proj_size * 2]) for e in context
+                tf.reshape(e, [-1, 1, self.encoder_size * 2]) for e in context
                 ]
             attention_states = tf.concat(1, top_states)
+
+            # print 'Context Shape: ' + str(context[0].get_shape())
+            # print 'Top states shape: ' + str(top_states[0].get_shape())
+            # print 'Attention states shape:' + str(attention_states.get_shape())
+            # print '\n'
 
             # run the decoder with attention
             outputs, states = seq2seq.embedding_attention_decoder(
@@ -374,71 +393,3 @@ class NMTModel(object):
             )
 
         return outputs, states
-
-    def _bidirectional_encoder(self, source, source_r):
-        """
-
-        Parameters
-        ----------
-        source
-
-        Returns
-        -------
-
-        """
-        # source_r = [tf.reverse(s, [False, True]) for s in source]
-
-        src_embedding = tf.Variable(
-            tf.truncated_normal(
-                [self.source_vocab_size, self.source_proj_size], stddev=0.01
-            ),
-            name='embedding_src'
-        )
-
-        with tf.device("/cpu:0"):
-            # get the embeddings
-            emb_inp = [tf.nn.embedding_lookup(src_embedding, s) for s in source]
-            emb_inpr = [tf.nn.embedding_lookup(src_embedding, r) for r in source_r]
-
-        initial_state = self.encoder_cell.zero_state(batch_size=self.batch_size, dtype=self.dtype)
-
-        fwd_outputs, fwd_states = rnn.rnn(self.encoder_cell, emb_inp,
-                                          initial_state=initial_state,
-                                          dtype=self.dtype,
-                                          scope='fwd_encoder')
-        bkw_outputs, bkw_states = rnn.rnn(self.encoder_cell, emb_inpr,
-                                          initial_state=initial_state,
-                                          dtype=self.dtype,
-                                          scope='bkw_encoder')
-
-        # revert the reversed sentence states to concatenate
-        # the second parameter is a list of dimensions to revert - False means does not change
-        # True means revert -We are reverting just the data dimension while time/bach stay equal
-        bkw_outputs = [tf.reverse(b, [False, False, True]) for b in bkw_outputs]
-
-        # concatenates the forward and backward annotations
-        context = []
-        for f, b in zip(fwd_outputs, bkw_outputs):
-            context.append(tf.concat(0, [f, b]))
-
-        # define the initial state for the decoder
-        # first create the weights and biases
-        Ws = tf.Variable(
-            tf.truncated_normal(
-                [self.encoder_size, self.encoder_size], stddev=0.01
-            ),
-            name='Ws'
-        )
-
-        bs = tf.Variable(
-            tf.truncated_normal([self.encoder_size], stddev=0.01),
-            name='bs'
-        )
-
-        # get the last hidden state of the encoder in the backward process
-        h1 = bkw_states[-1]
-
-        # perform tanh((Ws * h) + b0) step
-        decoder_initial_state = tf.nn.tanh(tf.nn.xw_plus_b(h1, Ws, bs))
-
-        return context, decoder_initial_state

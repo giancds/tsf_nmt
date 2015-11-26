@@ -8,10 +8,10 @@ import urllib
 from tensorflow.python.platform import gfile
 
 # Special vocabulary symbols - we always put them at the start.
-_PAD = "_PAD"
-_GO = "_GO"
-_EOS = "_EOS"
-_UNK = "_UNK"
+_PAD = '_PAD'
+_GO = '_GO'
+_EOS = '_EOS'
+_UNK = '_UNK'
 _START_VOCAB = [_PAD, _GO, _EOS, _UNK]
 
 PAD_ID = 0
@@ -19,17 +19,7 @@ GO_ID = 1
 EOS_ID = 2
 UNK_ID = 3
 
-_DIGIT_RE = re.compile(r"\d")
-
-# URLs for WMT data.
-_DATA_URL = "/home/gian/data/"
-_DATA_TRAIN_URL = _DATA_URL + "fapesp-v2.pt-en.train.%s.tok"
-_DATA_DEV_URL = _DATA_URL + "fapesp-v2.pt-en.dev.%s.tok"
-_DATA_TESTA_URL = _DATA_URL + "fapesp-v2.pt-en.test-a.%s.tok"
-_DATA_TESTB_URL = _DATA_URL + "fapesp-v2.pt-en.test-b.%s.tok"
-
-_SOURCE_LANG = "en"
-_TARGET_LANG = "pt"
+_DIGIT_RE = re.compile(r'\d')
 
 
 def basic_tokenizer(sentence):
@@ -42,7 +32,8 @@ def basic_tokenizer(sentence):
 
 def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
                       normalize_digits=True):
-    """Create vocabulary file (if it does not exist yet) from data file.
+    """
+    Create vocabulary file (if it does not exist yet) from data file.
 
     Data file is assumed to contain one sentence per line. Each sentence is
     tokenized and digits are normalized (if normalize_digits is set).
@@ -57,17 +48,17 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
       normalize_digits: Boolean; if true, all digits are replaced by 0s.
     """
     if not gfile.Exists(vocabulary_path):
-        print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
+        print('Creating vocabulary %s from data %s' % (vocabulary_path, data_path))
         vocab = {}
-        with gfile.GFile(data_path, mode="r") as f:
+        with gfile.GFile(data_path, mode='r') as f:
             counter = 0
             for line in f:
                 counter += 1
-                if counter % 100000 == 0:
+                if counter % 10000 == 0:
                     print("  processing line %d" % counter)
                 tokens = basic_tokenizer(line)
                 for w in tokens:
-                    word = re.sub(_DIGIT_RE, "0", w) if normalize_digits else w
+                    word = re.sub(_DIGIT_RE, '0', w) if normalize_digits else w
                     if word in vocab:
                         vocab[word] += 1
                     else:
@@ -75,19 +66,20 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
             vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
             if len(vocab_list) > max_vocabulary_size:
                 vocab_list = vocab_list[:max_vocabulary_size]
-            with gfile.GFile(vocabulary_path, mode="w") as vocab_file:
+            with gfile.GFile(vocabulary_path, mode='w') as vocab_file:
                 for w in vocab_list:
-                    vocab_file.write(w + "\n")
+                    vocab_file.write(w + '\n')
 
 
 def initialize_vocabulary(vocabulary_path):
-    """Initialize vocabulary from file.
+    """
+    Initialize vocabulary from file.
 
     We assume the vocabulary is stored one-item-per-line, so a file:
       dog
       cat
-    will result in a vocabulary {"dog": 0, "cat": 1}, and this function will
-    also return the reversed-vocabulary ["dog", "cat"].
+    will result in a vocabulary {'dog': 0, 'cat': 1}, and this function will
+    also return the reversed-vocabulary ['dog', 'cat'].
 
     Args:
       vocabulary_path: path to the file containing the vocabulary.
@@ -101,22 +93,23 @@ def initialize_vocabulary(vocabulary_path):
     """
     if gfile.Exists(vocabulary_path):
         rev_vocab = []
-        with gfile.GFile(vocabulary_path, mode="r") as f:
+        with gfile.GFile(vocabulary_path, mode='r') as f:
             rev_vocab.extend(f.readlines())
         rev_vocab = [line.strip() for line in rev_vocab]
         vocab = dict([(x, y) for (y, x) in enumerate(rev_vocab)])
         return vocab, rev_vocab
     else:
-        raise ValueError("Vocabulary file %s not found.", vocabulary_path)
+        raise ValueError('Vocabulary file %s not found.', vocabulary_path)
 
 
 def sentence_to_token_ids(sentence, vocabulary,
                           normalize_digits=True):
-    """Convert a string to list of integers representing token-ids.
+    """
+    Convert a string to list of integers representing token-ids.
 
-    For example, a sentence "I have a dog" may become tokenized into
-    ["I", "have", "a", "dog"] and with vocabulary {"I": 1, "have": 2,
-    "a": 4, "dog": 7"} this function will return [1, 2, 4, 7].
+    For example, a sentence 'I have a dog' may become tokenized into
+    ['I', 'have', 'a', 'dog'] and with vocabulary {'I': 1, 'have': 2,
+    'a': 4, 'dog': 7'} this function will return [1, 2, 4, 7].
 
     Args:
       sentence: a string, the sentence to convert to token-ids.
@@ -130,12 +123,13 @@ def sentence_to_token_ids(sentence, vocabulary,
     if not normalize_digits:
         return [vocabulary.get(w, UNK_ID) for w in words]
     # Normalize digits by 0 before looking words up in the vocabulary.
-    return [vocabulary.get(re.sub(_DIGIT_RE, "0", w), UNK_ID) for w in words]
+    return [vocabulary.get(re.sub(_DIGIT_RE, '0', w), UNK_ID) for w in words]
 
 
 def data_to_token_ids(data_path, target_path, vocabulary_path,
                       tokenizer=None, normalize_digits=True):
-    """Tokenize data file and turn into token-ids using given vocabulary file.
+    """
+    Tokenize data file and turn into token-ids using given vocabulary file.
 
     This function loads data line-by-line from data_path, calls the above
     sentence_to_token_ids, and saves the result to target_path. See comment
@@ -150,20 +144,20 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
       normalize_digits: Boolean; if true, all digits are replaced by 0s.
     """
     if not gfile.Exists(target_path):
-        print("Tokenizing data in %s" % data_path)
+        print('Tokenizing data in %s' % data_path)
         vocab, _ = initialize_vocabulary(vocabulary_path)
-        with gfile.GFile(data_path, mode="r") as data_file:
-            with gfile.GFile(target_path, mode="w") as tokens_file:
+        with gfile.GFile(data_path, mode='r') as data_file:
+            with gfile.GFile(target_path, mode='w') as tokens_file:
                 counter = 0
                 for line in data_file:
                     counter += 1
-                    if counter % 100000 == 0:
+                    if counter % 10000 == 0:
                         print("  tokenizing line %d" % counter)
                     token_ids = sentence_to_token_ids(line, vocab, normalize_digits)
-                    tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
+                    tokens_file.write(' '.join([str(tok) for tok in token_ids]) + '\n')
 
 
-def prepare_data(src_vocabulary_size, tgt_vocabulary_size):
+def prepare_data(FLAGS):
     """Get WMT data into data_dir, create vocabularies and tokenize data.
 
     Args:
@@ -181,48 +175,46 @@ def prepare_data(src_vocabulary_size, tgt_vocabulary_size):
         (7) path to the source vocabulary file,
         (8) path to the target vocabulary file.
     """
-    # # Get wmt data to the specified directory.
-    # train_path = os.path.join(_DATA_URL, _DATA_TRAIN_URL)
-    # dev_path = get_wmt_enfr_dev_set(data_dir)
-    # test_path = get_wmt_enfr_dev_set(data_dir)
+    # setting relevant info:
+    data_dir = FLAGS.data_dir
+    train_data = data_dir + FLAGS.train_data
+    valid_data = data_dir + FLAGS.valid_data
+    test_data = data_dir + FLAGS.test_data
+
+    source_lang = FLAGS.source_lang
+    target_lang = FLAGS.target_lang
+
+    src_vocabulary_size = FLAGS.src_vocab_size
+    tgt_vocabulary_size = FLAGS.tgt_vocab_size
 
     # Create vocabularies of the appropriate sizes.
-    src_vocab_path = (_DATA_TRAIN_URL % _SOURCE_LANG) + (".vocab%d" % src_vocabulary_size)
-    tgt_vocab_path = (_DATA_TRAIN_URL % _TARGET_LANG) + (".vocab%d" % tgt_vocabulary_size)
+    src_vocab_path = (train_data % str(src_vocabulary_size)) + ('.vocab.%s' % source_lang)
+    tgt_vocab_path = (train_data % str(tgt_vocabulary_size)) + ('.vocab.%s' % target_lang)
 
-    create_vocabulary(src_vocab_path, _DATA_TRAIN_URL % _SOURCE_LANG, src_vocabulary_size)
-    create_vocabulary(tgt_vocab_path, _DATA_TRAIN_URL % _TARGET_LANG, tgt_vocabulary_size)
+    create_vocabulary(src_vocab_path, train_data % source_lang, src_vocabulary_size)
+    create_vocabulary(tgt_vocab_path, train_data % target_lang, tgt_vocabulary_size)
 
     # Create token ids for the training data.
-    src_train_ids_path = (_DATA_TRAIN_URL % _SOURCE_LANG) + (".ids%d" % src_vocabulary_size)
-    tgt_train_ids_path = (_DATA_TRAIN_URL % _TARGET_LANG) + (".ids%d" % tgt_vocabulary_size)
+    src_train_ids_path = (train_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    tgt_train_ids_path = (train_data % str(tgt_vocabulary_size)) + ('.ids.%s' % target_lang)
 
-    data_to_token_ids(_DATA_TRAIN_URL % _SOURCE_LANG, src_train_ids_path, src_vocab_path)
-    data_to_token_ids(_DATA_TRAIN_URL % _TARGET_LANG, tgt_train_ids_path, tgt_vocab_path)
+    data_to_token_ids(train_data % source_lang, src_train_ids_path, src_vocab_path)
+    data_to_token_ids(train_data % target_lang, tgt_train_ids_path, tgt_vocab_path)
 
     # Create token ids for the development data.
-    tgt_dev_ids_path = (_DATA_DEV_URL % _SOURCE_LANG) + (".ids%d" % src_vocabulary_size)
-    src_dev_ids_path = (_DATA_DEV_URL % _TARGET_LANG) + (".ids%d" % tgt_vocabulary_size)
+    tgt_dev_ids_path = (valid_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    src_dev_ids_path = (valid_data % str(tgt_vocabulary_size)) + ('.ids.%s' % target_lang)
 
-    data_to_token_ids(_DATA_DEV_URL % _SOURCE_LANG, src_dev_ids_path, src_vocab_path)
-    data_to_token_ids(_DATA_DEV_URL % _TARGET_LANG, tgt_dev_ids_path, tgt_vocab_path)
-
-    # Create token ids for the test data.
-    tgt_testa_ids_path = (_DATA_TESTA_URL % _SOURCE_LANG) + (".ids%d" % src_vocabulary_size)
-    src_testa_ids_path = (_DATA_TESTA_URL % _TARGET_LANG) + (".ids%d" % tgt_vocabulary_size)
-
-    data_to_token_ids(_DATA_TESTA_URL % _SOURCE_LANG, src_testa_ids_path, src_vocab_path)
-    data_to_token_ids(_DATA_TESTA_URL % _TARGET_LANG, tgt_testa_ids_path, tgt_vocab_path)
+    data_to_token_ids(valid_data % source_lang, src_dev_ids_path, src_vocab_path)
+    data_to_token_ids(valid_data % target_lang, tgt_dev_ids_path, tgt_vocab_path)
 
     # Create token ids for the test data.
-    tgt_testb_ids_path = (_DATA_TESTB_URL % _SOURCE_LANG) + (".ids%d" % src_vocabulary_size)
-    src_testb_ids_path = (_DATA_TESTB_URL % _TARGET_LANG) + (".ids%d" % tgt_vocabulary_size)
+    tgt_test_ids_path = (test_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    src_test_ids_path = (test_data % str(tgt_vocabulary_size)) + ('.ids.%s' % target_lang)
 
-    data_to_token_ids(_DATA_TESTB_URL % _SOURCE_LANG, src_testb_ids_path, src_vocab_path)
-    data_to_token_ids(_DATA_TESTB_URL % _TARGET_LANG, tgt_testb_ids_path, tgt_vocab_path)
+    data_to_token_ids(test_data % source_lang, src_test_ids_path, src_vocab_path)
+    data_to_token_ids(test_data % target_lang, tgt_test_ids_path, tgt_vocab_path)
 
     return (src_train_ids_path, tgt_train_ids_path,
             src_dev_ids_path, tgt_dev_ids_path,
-            src_testa_ids_path, tgt_testa_ids_path,
-            src_testb_ids_path, tgt_testb_ids_path,
-            src_vocab_path, tgt_vocab_path)
+            src_test_ids_path, tgt_test_ids_path)

@@ -28,7 +28,7 @@ import nmt_model
 
 # flags related to the model optimization
 tf.app.flags.DEFINE_float('learning_rate', 1e-4, 'Learning rate.')
-tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.99, 'Learning rate decays by this much.')
+tf.app.flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by this much.')
 tf.app.flags.DEFINE_string('optimizer', 'adam',
                            'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
@@ -51,7 +51,7 @@ tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary
 tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-tf.app.flags.DEFINE_string('model_name', 'model_hid100_proj10_en10000_pt10000_rmsprop.ckpt', 'Data directory')
+tf.app.flags.DEFINE_string('model_name', 'model_hid100_proj10_en30000_pt30000_sgd07.ckpt', 'Data directory')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
 tf.app.flags.DEFINE_string('train_dir', '/home/gian/train/', 'Data directory')
 tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
@@ -75,7 +75,7 @@ tf.app.flags.DEFINE_integer('early_stop_patience', 10, 'How many training steps 
 
 # decoding/testing flags
 tf.app.flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
-tf.app.flags.DEFINE_boolean('decode_input', True, 'Set to True for interactive decoding.')
+tf.app.flags.DEFINE_boolean('decode_input', False, 'Set to True for interactive decoding.')
 
 tf.app.flags.DEFINE_boolean('self_test', False, 'Run a self-test if this is set to True.')
 
@@ -143,20 +143,21 @@ def create_model(session, forward_only):
     else:
         batch = FLAGS.batch_size
 
-    model = nmt_model.NMTModel(source_vocab_size=FLAGS.src_vocab_size,
-                               target_vocab_size=FLAGS.tgt_vocab_size,
-                               buckets=_buckets,
-                               source_proj_size=FLAGS.source_proj_size,
-                               target_proj_size=FLAGS.target_proj_size,
-                               encoder_size=FLAGS.encoder_size,
-                               decoder_size=FLAGS.decoder_size,
-                               num_layers=FLAGS.num_layers,
-                               max_gradient_norm=FLAGS.max_gradient_norm,
-                               batch_size=batch,
-                               learning_rate=FLAGS.learning_rate,
-                               learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
-                               optimizer=FLAGS.optimizer,
-                               forward_only=forward_only)
+    model = nmt_model.NMTBidirectionalModel(source_vocab_size=FLAGS.src_vocab_size,
+                                            target_vocab_size=FLAGS.tgt_vocab_size,
+                                            buckets=_buckets,
+                                            source_proj_size=FLAGS.source_proj_size,
+                                            target_proj_size=FLAGS.target_proj_size,
+                                            encoder_size=FLAGS.encoder_size,
+                                            decoder_size=FLAGS.decoder_size,
+                                            num_layers=FLAGS.num_layers,
+                                            max_gradient_norm=FLAGS.max_gradient_norm,
+                                            batch_size=batch,
+                                            learning_rate=FLAGS.learning_rate,
+                                            learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
+                                            optimizer=FLAGS.optimizer,
+                                            use_lstm=False,
+                                            forward_only=forward_only)
 
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
     if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
@@ -221,7 +222,10 @@ def train():
             step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
             loss += step_loss / FLAGS.steps_per_checkpoint
             current_step += 1
-            if current_step % train_total_size == 0:
+            # if current_step % train_total_size == 0:
+            #     epoch += 1
+            batch_size = model.batch_size
+            if (train_total_size - (current_step * batch_size)) < batch_size:
                 epoch += 1
             total_loss += step_loss
 
@@ -370,10 +374,6 @@ def beam_search(sess, model, token_ids, bucket_id, beam_size=12, n_best=10):
 
             # get the best words and best scores for this particular hypothesis
             cand_scores = output_logits[current_step][0]  # each output_logit is a list of ndarrays
-            # if current_step == 0:
-            #     best_words = cand_scores.argsort()[-beam_size:]
-            # else:
-            #     best_words = cand_scores.argsort()[-1:]
             best_words = cand_scores.argsort()[-beam_size:]
             best_scores = cand_scores[best_words]
 

@@ -16,7 +16,7 @@ import data_utils
 import nmt
 
 
-class NMTModel(object):
+class NMTBidirectionalModel(object):
     """
     Neural Machine Translation model with bi-directional encoder, attention and for multiple
         buckets.
@@ -28,9 +28,6 @@ class NMTModel(object):
 
     This class also allows to use GRU cells in addition to LSTM cells, and
     sampled softmax to handle large output vocabulary size.
-
-    A single-layer version of this model, but with bi-directional encoder, was presented in
-      http://arxiv.org/abs/1409.0473
 
     """
 

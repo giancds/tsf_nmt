@@ -76,8 +76,11 @@ class NMTBidirectionalModel(object):
         self.buckets = buckets
         self.batch_size = batch_size
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
-        self.learning_rate_decay_op = self.learning_rate.assign(
-            self.learning_rate * learning_rate_decay_factor)
+        self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
+
+        self.epoch = tf.Variable(0, trainable=False)
+        self.epoch_update_op = self.epoch.assign(self.epoch + 1)
+
         self.global_step = tf.Variable(0, trainable=False)
         self.source_proj_size = source_proj_size
         self.target_proj_size = target_proj_size

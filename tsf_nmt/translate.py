@@ -225,8 +225,9 @@ def train():
             # if current_step % train_total_size == 0:
             #     epoch += 1
             batch_size = model.batch_size
+            # update epoch number
             if (train_total_size - (current_step * batch_size)) < batch_size:
-                epoch += 1
+                sess.run(model.epoch_update_op)
             total_loss += step_loss
 
             if current_step % FLAGS.steps_verbosity == 0:

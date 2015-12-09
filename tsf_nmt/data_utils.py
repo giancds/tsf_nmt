@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Utilities for downloading data from WMT, tokenizing, vocabularies."""
 from __future__ import print_function
 import gzip

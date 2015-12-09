@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Binary for training translation models and decoding from them.
 
 Running this program without --decode will download the WMT corpus into
@@ -17,6 +18,8 @@ import os
 import sys
 import time
 import copy
+import heapq
+import math
 import numpy
 import tensorflow as tf
 from tensorflow.python.platform import gfile
@@ -24,13 +27,15 @@ import data_utils
 import nmt_model
 
 # flags related to the model optimization
-tf.app.flags.DEFINE_float('learning_rate', 0.5, 'Learning rate.')
+tf.app.flags.DEFINE_float('learning_rate', 1e-4, 'Learning rate.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.99, 'Learning rate decays by this much.')
-tf.app.flags.DEFINE_string('optimizer', 'sgd',
+tf.app.flags.DEFINE_string('optimizer', 'adam',
                            'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
 tf.app.flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 tf.app.flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
+tf.app.flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
+tf.app.flags.DEFINE_integer('max_epochs', 1000, 'Batch size to use during training.')
 tf.app.flags.DEFINE_integer('max_train_data_size', 0,
                             'Limit on the size of training data (0: no limit).')
 
@@ -46,6 +51,7 @@ tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary
 tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
+tf.app.flags.DEFINE_string('model_name', 'model_hid100_proj10_en10000_pt10000_rmsprop.ckpt', 'Data directory')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
 tf.app.flags.DEFINE_string('train_dir', '/home/gian/train/', 'Data directory')
 tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
@@ -69,7 +75,7 @@ tf.app.flags.DEFINE_integer('early_stop_patience', 10, 'How many training steps 
 
 # decoding/testing flags
 tf.app.flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
-tf.app.flags.DEFINE_boolean('decode_input', False, 'Set to True for interactive decoding.')
+tf.app.flags.DEFINE_boolean('decode_input', True, 'Set to True for interactive decoding.')
 
 tf.app.flags.DEFINE_boolean('self_test', False, 'Run a self-test if this is set to True.')
 
@@ -83,7 +89,7 @@ _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
 def read_data(source_path, target_path, max_size=None):
     """Read data from source and target files and put into buckets.
 
-    Args:
+    Args:lse
       source_path: path to the files with token-ids for the source language.
       target_path: path to the file with token-ids for the target language;
         it must be aligned with the source file: n-th line contains the desired
@@ -98,10 +104,11 @@ def read_data(source_path, target_path, max_size=None):
         len(target) < _buckets[n][1]; source and target are lists of token-ids.
     """
     data_set = [[] for _ in _buckets]
+    counter = 0
     with gfile.GFile(source_path, mode='r') as source_file:
         with gfile.GFile(target_path, mode='r') as target_file:
             source, target = source_file.readline(), target_file.readline()
-            counter = 0
+
             while source and target and (not max_size or counter < max_size):
                 counter += 1
                 if counter % 10000 == 0:
@@ -157,7 +164,7 @@ def create_model(session, forward_only):
         model.saver.restore(session, ckpt.model_checkpoint_path)
     else:
         print('Created model with fresh parameters.')
-        session.run(tf.variables.initialize_all_variables())
+        session.run(tf.initialize_all_variables())
     return model
 
 
@@ -196,7 +203,8 @@ def train():
         current_step = 0
         previous_losses = []
         total_loss = 0.0
-        while True:
+        epoch = 1  # we start with the first epoch
+        while epoch < FLAGS.max_epochs:
             # Choose a bucket according to data distribution. We pick a random number
             # in [0, 1] and use the corresponding interval in train_buckets_scale.
             random_number_01 = numpy.random.random_sample()
@@ -213,12 +221,14 @@ def train():
             step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
             loss += step_loss / FLAGS.steps_per_checkpoint
             current_step += 1
+            if current_step % train_total_size == 0:
+                epoch += 1
             total_loss += step_loss
 
             if current_step % FLAGS.steps_verbosity == 0:
-                print('global step %d learning rate %.4f step-time %.2f avg. loss %.8f' %
-                      (model.global_step.eval(), model.learning_rate.eval(), step_time,
-                       total_loss/current_step))
+                print('epoch %d global step %d learning rate %.4f step-time %.2f avg. loss %.8f' %
+                      (epoch, model.global_step.eval(), model.learning_rate.eval(),
+                       step_time, total_loss / current_step))
 
             # Once in a while, we save checkpoint, print statistics, and run evals.
             if current_step % FLAGS.steps_per_checkpoint == 0:
@@ -231,17 +241,17 @@ def train():
 
                 # Decrease learning rate if no improvement was seen over last n times.
                 prevs = FLAGS.lr_rate_patience
-                if len(previous_losses) > (prevs-1) and loss > max(previous_losses[-prevs:]):
+                if len(previous_losses) > (prevs - 1) and loss > max(previous_losses[-prevs:]):
                     sess.run(model.learning_rate_decay_op)
                 previous_losses.append(loss)
 
                 # Save checkpoint and zero timer and loss.
-                checkpoint_path = os.path.join(FLAGS.train_dir, 'translate.ckpt')
+                checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
                 step_time, loss = 0.0, 0.0
 
                 prevs = FLAGS.early_stop_patience
-                if len(previous_losses) > (prevs-1) and loss > max(previous_losses[-prevs:]):
+                if len(previous_losses) > (prevs - 1) and loss > max(previous_losses[-prevs:]):
                     print('EARLY STOP!')
                     break
 
@@ -260,8 +270,8 @@ def train():
 
                     total_eval_loss += eval_loss
 
-                    # eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
-                    # print('  eval: bucket %d perplexity %.2f' % (bucket_id, eval_ppx))
+                    eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
+                    print('  eval: bucket %d perplexity %.2f' % (bucket_id, eval_ppx))
 
                 avg_loss = total_eval_loss / len(_buckets)
                 print('  eval: averaged loss %.8f' % avg_loss)
@@ -269,11 +279,11 @@ def train():
                 sys.stdout.flush()
 
 
-def decode_from_stdin():
+def decode_from_stdin(beam_size=12, n_best=10, show_all_n_best=False):
     with tf.Session() as sess:
+
         # Create model and load parameters.
         model = create_model(sess, True)
-        model.batch_size = 1  # We decode one sentence at a time.
 
         # Load vocabularies.
         source_vocab_file = FLAGS.data_dir + \
@@ -288,39 +298,126 @@ def decode_from_stdin():
         _, rev_tgt_vocab = data_utils.initialize_vocabulary(target_vocab_file)
 
         # Decode from standard input.
-        sys.stdout.write('> ')
+        sys.stdout.write("> ")
         sys.stdout.flush()
         sentence = sys.stdin.readline()
-
         while sentence:
 
             # Get token-ids for the input sentence.
             token_ids = data_utils.sentence_to_token_ids(sentence, src_vocab)
 
             # Which bucket does it belong to?
-            bucket_id = min([b for b in xrange(len(_buckets))
-                             if _buckets[b][0] > len(token_ids)])
-
-            # Get a 1-element batch to feed the sentence to the model.
-            encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights = model.get_batch(
-                {bucket_id: [(token_ids, token_ids[::-1], [])]}, bucket_id)
+            bucket_id = min([b for b in xrange(len(_buckets)) if _buckets[b][0] > len(token_ids)])
 
             # Get output logits for the sentence.
-            _, _, output_logits = model.step(sess, encoder_inputs, encoder_inputs_r, decoder_inputs,
-                                             target_weights, bucket_id, True)
+            output_hypotheses, output_scores = beam_search(sess, model, token_ids, bucket_id, beam_size, n_best=n_best)
 
-            # This is a greedy decoder - outputs are just argmaxes of output_logits.
-            outputs = [int(numpy.argmax(logit, axis=1)) for logit in output_logits]
+            # print translations
+            if show_all_n_best:
+                for x in xrange(len(output_hypotheses)):
+                    outputs = output_hypotheses[x]
+                    # Print out French sentence corresponding to outputs.
+                    print(" ".join([rev_tgt_vocab[output] for output in outputs]))
+            else:
+                outputs = output_hypotheses[0]
+                # Print out French sentence corresponding to outputs.
+                print(" ".join([rev_tgt_vocab[output] for output in outputs]))
 
-            # If there is an EOS symbol in outputs, cut them at that point.
-            if data_utils.EOS_ID in outputs:
-                outputs = outputs[:outputs.index(data_utils.EOS_ID)]
-
-            # Print out French sentence corresponding to outputs.
-            print(' '.join([rev_tgt_vocab[output] for output in outputs]))
-            print('> ', end='')
+            # wait for a new sentence to translate
+            print("> ", end="")
             sys.stdout.flush()
             sentence = sys.stdin.readline()
+
+
+def beam_search(sess, model, token_ids, bucket_id, beam_size=12, n_best=10):
+    complete_translations = []
+    complete_scores = []
+
+    # Get a 1-element batch to feed the sentence to the model.
+    encoder_inputs, encoder_inputs_r, decoder_inputs, output_mask = \
+                model.get_batch({bucket_id: [(token_ids, token_ids[::-1], [])]}, bucket_id)
+
+    bucket_size = _buckets[bucket_id][1]
+
+    current_hypotheses = [[decoder_inputs[0]]]
+    current_scores = [0.0]
+
+    current_step = 0
+    string = 'Searching...'
+
+    # while we do not find n_best hypotheses
+    while len(complete_translations) < n_best and current_step < bucket_size:
+
+        temp_hypotheses = []
+        temp_scores = []
+
+        for h in xrange(len(current_hypotheses)):
+
+            if current_step > 0:
+                output_mask[current_step][0] = 1.0
+
+            hypothesis = current_hypotheses[h]
+            score = current_scores[h]
+
+            # add ndarrays with the one 0 element to fit the bucket size
+            for i in xrange(bucket_size-len(hypothesis)):
+                hypothesis += [numpy.array([0])]
+
+            # Get output logits for the sentence - returns a list,
+            # we only need the position of the current step
+            _, _, output_logits = model.step(sess, encoder_inputs, encoder_inputs_r,
+                                             hypothesis, output_mask, bucket_id, True)
+
+            # get the best words and best scores for this particular hypothesis
+            cand_scores = output_logits[current_step][0]  # each output_logit is a list of ndarrays
+            # if current_step == 0:
+            #     best_words = cand_scores.argsort()[-beam_size:]
+            # else:
+            #     best_words = cand_scores.argsort()[-1:]
+            best_words = cand_scores.argsort()[-beam_size:]
+            best_scores = cand_scores[best_words]
+
+            # add new hypothesis and scores to the temporary sets of hypothesis and scores
+            for i in xrange(len(best_words)):
+                temp_hypotheses.append(hypothesis[:current_step+1] + [numpy.array([best_words[i]], dtype='int32')])
+                temp_scores.append(score - numpy.log(best_scores[i]))
+
+        # search on the temporary set for the best scores
+        kept_hypotheses = numpy.argsort(temp_scores)[-beam_size:][::-1]
+
+        # keep alive only the 'beam_size' best hypothesis
+        current_hypotheses = [temp_hypotheses[i] for i in kept_hypotheses]
+        current_scores = [temp_scores[i] for i in kept_hypotheses]
+
+        # check if there are any complete hypotheses among those kept alive and add them to the set of complete ones
+        for idx in xrange(len(current_hypotheses)):
+            if current_hypotheses[idx][-1][0] == data_utils.EOS_ID:
+                complete_translations += current_hypotheses[idx]
+                complete_scores += current_hypotheses
+                current_hypotheses.remove(idx)
+                current_scores.remove(idx)
+
+        # increment current_step
+        current_step += 1
+        string += '.'
+        sys.stdout.write("\r")  # ensure stuff will be printed at the same line during an epoch
+        sys.stdout.write(string)
+        sys.stdout.flush()
+
+    print('\n')
+
+    if len(complete_translations) < n_best:
+        for i in xrange(n_best-len(complete_translations)):
+            complete_translations.append(current_hypotheses[i])
+            complete_scores.append(current_scores[i])
+
+    temp_complete = []
+    for complete in complete_translations:
+        temp_complete.append([c[0] for c in complete[1:]])
+
+    complete_translations = temp_complete
+
+    return complete_translations, current_scores
 
 
 def decode_from_file(file_path):
@@ -330,10 +427,15 @@ def decode_from_file(file_path):
         model = create_model(sess, True)
         model.batch_size = 1  # We decode one sentence at a time.
 
-        source_vocab_file = FLAGS.data_dir + FLAGS.vocab_file + FLAGS.source_lang
-        target_vocab_file = FLAGS.data_dir + FLAGS.vocab_file + FLAGS.target_lang
-
         # Load vocabularies.
+        source_vocab_file = FLAGS.data_dir + \
+                            (FLAGS.train_data % str(FLAGS.src_vocab_size)) + \
+                            ('.vocab.%s' % FLAGS.source_lang)
+
+        target_vocab_file = FLAGS.data_dir + \
+                            (FLAGS.train_data % str(FLAGS.tgt_vocab_size)) + \
+                            ('.vocab.%s' % FLAGS.target_lang)
+
         src_vocab, _ = data_utils.initialize_vocabulary(source_vocab_file)
         _, rev_tgt_vocab = data_utils.initialize_vocabulary(target_vocab_file)
 
@@ -355,9 +457,9 @@ def decode_from_file(file_path):
                         model.get_batch({bucket_id: [(token_ids, token_ids[::-1], [])]}, bucket_id)
 
                     # Get output logits for the sentence.
-                    _, _, output_logits = model.step(sess, encoder_inputs, encoder_inputs_r,
-                                                     decoder_inputs, target_weights, bucket_id,
-                                                     True)
+                    output_logits = model.step(sess, encoder_inputs, encoder_inputs_r,
+                                               decoder_inputs,
+                                               target_weights, bucket_id, True)
 
                     # This is a greedy decoder - outputs are just argmaxes of output_logits.
                     outputs = [int(numpy.argmax(logit, axis=1)) for logit in output_logits]
@@ -369,85 +471,6 @@ def decode_from_file(file_path):
                     # Print out sentence corresponding to outputs.
                     destiny.write(sentence.join([rev_tgt_vocab[output] for output in outputs]))
                     sentence = source.readline()
-
-
-# generate sample, either with stochastic sampling or beam search. Note that,
-# this function iteratively calls f_init and f_next functions.
-def gen_sample(f_init, f_next, x, k=1, maxlen=30):
-
-    sample = []
-    sample_score = []
-
-    live_k = 1
-    dead_k = 0
-
-    hyp_samples = [[]] * live_k
-    hyp_scores = numpy.zeros(live_k).astype('float32')
-    hyp_states = []
-
-    # get initial state of decoder rnn and encoder context
-    ret = f_init(x)
-    next_state, ctx0 = ret[0], ret[1]
-    next_w = -1 * numpy.ones((1,)).astype('int64')  # bos indicator
-
-    for ii in xrange(maxlen):
-        ctx = numpy.tile(ctx0, [live_k, 1])
-        inps = [next_w, ctx, next_state]
-        ret = f_next(*inps)
-        next_p, next_w, next_state = ret[0], ret[1], ret[2]
-
-        cand_scores = hyp_scores[:, None] - numpy.log(next_p)
-        cand_flat = cand_scores.flatten()
-        ranks_flat = cand_flat.argsort()[:(k - dead_k)]
-
-        voc_size = next_p.shape[1]
-        trans_indices = ranks_flat / voc_size
-        word_indices = ranks_flat % voc_size
-        costs = cand_flat[ranks_flat]
-
-        new_hyp_samples = []
-        new_hyp_scores = numpy.zeros(k - dead_k).astype('float32')
-        new_hyp_states = []
-
-        for idx, [ti, wi] in enumerate(zip(trans_indices, word_indices)):
-            new_hyp_samples.append(hyp_samples[ti] + [wi])
-            new_hyp_scores[idx] = copy.copy(costs[ti])
-            new_hyp_states.append(copy.copy(next_state[ti]))
-
-        # check the finished samples
-        new_live_k = 0
-        hyp_samples = []
-        hyp_scores = []
-        hyp_states = []
-
-        for idx in xrange(len(new_hyp_samples)):
-            if new_hyp_samples[idx][-1] == 0:
-                sample.append(new_hyp_samples[idx])
-                sample_score.append(new_hyp_scores[idx])
-                dead_k += 1
-            else:
-                new_live_k += 1
-                hyp_samples.append(new_hyp_samples[idx])
-                hyp_scores.append(new_hyp_scores[idx])
-                hyp_states.append(new_hyp_states[idx])
-        hyp_scores = numpy.array(hyp_scores)
-        live_k = new_live_k
-
-        if new_live_k < 1:
-            break
-        if dead_k >= k:
-            break
-
-        next_w = numpy.array([w[-1] for w in hyp_samples])
-        next_state = numpy.array(hyp_states)
-
-    # dump every remaining one
-    if live_k > 0:
-        for idx in xrange(live_k):
-            sample.append(hyp_samples[idx])
-            sample_score.append(hyp_scores[idx])
-
-    return sample, sample_score
 
 
 def self_test():
@@ -474,9 +497,9 @@ def main(_):
     if FLAGS.self_test:
         self_test()
     elif FLAGS.decode_input:
-        decode_from_stdin()
+        decode_from_stdin(show_all_n_best=True)
     elif FLAGS.decode_file:
-        decode_from_file('')
+        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.10000.ids.en')
     else:
         train()
 

@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
 """
-    Sequence-to-sequence model with the attention mechanism described in
+    Sequence-to-sequence model with bi-directional encoder and the attention mechanism described in
 
+        arxiv.org/abs/1412.2007
 
-    and support to buckets
+    and support to buckets.
 
 """
 
@@ -15,7 +17,9 @@ import nmt
 
 
 class NMTModel(object):
-    """Neural Machine Translation model with attention and for multiple buckets.
+    """
+    Neural Machine Translation model with bi-directional encoder, attention and for multiple
+        buckets.
 
     This class implements single-layer or multi-layer bi-directional recurrent neural
     network as encoder, and an attention-based decoder. This is the same as the model
@@ -205,25 +209,47 @@ class NMTModel(object):
         return optimizer
 
     def step(self, session, encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights,
-             bucket_id, forward_only):
-        """Run a step of the model feeding the given inputs.
+             bucket_id, forward_only, softmax=False):
+        """
+        Run a step of the model feeding the given inputs.
 
-        Args:
-          session: tensorflow session to use.
-          encoder_inputs: list of numpy int vectors to feed as encoder inputs.
-          encoder_inputs_r: list of numpy int vectors to feed as encoder inputs (reversed sentence).
-          decoder_inputs: list of numpy int vectors to feed as decoder inputs.
-          target_weights: list of numpy float vectors to feed as target weights.
-          bucket_id: which bucket of the model to use.
-          forward_only: whether to do the backward step or only forward.
+        Parameters
+        ----------
+            session:
+                tensorflow session to use.
 
-        Returns:
-          A triple consisting of gradient norm (or None if we did not do backward),
-          average perplexity, and the outputs.
+            encoder_inputs:
+                list of numpy int vectors to feed as encoder inputs.
 
-        Raises:
-          ValueError: if length of enconder_inputs, decoder_inputs, or
-            target_weights disagrees with bucket size for the specified bucket_id.
+            encoder_inputs_r:
+                list of numpy int vectors to feed as encoder inputs (reversed sentence).
+
+            decoder_inputs:
+                list of numpy int vectors to feed as decoder inputs.
+
+            target_weights:
+                list of numpy float vectors to feed as target weights. This is the mask applied to
+                    the target.
+
+            bucket_id:
+                which bucket of the model to use.
+
+            forward_only:
+                whether to do the backward step or only forward.
+
+            softmax:
+                whether to apply the softmax activation to the output logits
+
+        Returns
+        -------
+             A triple consisting of gradient norm (or None if we did not do backward),
+                average perplexity, and the outputs.
+
+        Raises
+        ------
+            ValueError: if length of enconder_inputs, decoder_inputs, or
+                target_weights disagrees with bucket size for the specified bucket_id.
+
         """
         # Check if the sizes match.
         encoder_size, decoder_size = self.buckets[bucket_id]
@@ -258,8 +284,12 @@ class NMTModel(object):
                            self.losses[bucket_id]]  # Loss for this batch.
         else:
             output_feed = [self.losses[bucket_id]]  # Loss for this batch.
-            for l in xrange(decoder_size):  # Output logits.
-                output_feed.append(self.outputs[bucket_id][l])
+            if softmax:
+                for l in xrange(decoder_size):  # Output logits.
+                    output_feed.append(tf.nn.softmax(self.outputs[bucket_id][l]))
+            else:
+                for l in xrange(decoder_size):  # Output logits.
+                    output_feed.append(self.outputs[bucket_id][l])
 
         outputs = session.run(output_feed, input_feed)
         if not forward_only:
@@ -267,7 +297,7 @@ class NMTModel(object):
         else:
             return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
 
-    def get_batch(self, data, bucket_id):
+    def get_batch(self, data, bucket_id, decode=False):
         """Get a random batch of data from the specified bucket, prepare for step.
 
         To feed data in step(..) it must be a list of batch-major vectors, while
@@ -280,7 +310,7 @@ class NMTModel(object):
           bucket_id: integer, which bucket to get the batch for.
 
         Returns:
-          The triple (encoder_inputs, decoder_inputs, target_weights) for
+          The quadruple (encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights) for
           the constructed batch that has the proper format to call step(...) later.
         """
         encoder_size, decoder_size = self.buckets[bucket_id]
@@ -316,7 +346,7 @@ class NMTModel(object):
                 np.array([encoder_inputs_r[batch_r_idx][length_idx]
                           for batch_r_idx in xrange(self.batch_size)], dtype=np.int32))
 
-        # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
+        # Batch decoder inputs are re-indexed decoder_inputs, we create weights (mask).
         for length_idx in xrange(decoder_size):
             batch_decoder_inputs.append(
                 np.array([decoder_inputs[batch_idx][length_idx]
@@ -332,7 +362,11 @@ class NMTModel(object):
                 if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
                     batch_weight[batch_idx] = 0.0
             batch_weights.append(batch_weight)
-        return batch_encoder_inputs, batch_encoder_inputs_r, batch_decoder_inputs, batch_weights
+
+        if decode:  # when decoding we are only interested on the input now
+            return batch_encoder_inputs, batch_encoder_inputs_r
+        else:
+            return batch_encoder_inputs, batch_encoder_inputs_r, batch_decoder_inputs, batch_weights
 
     def inference(self, source, source_r, target, do_decode=False):
         """
@@ -355,6 +389,16 @@ class NMTModel(object):
         -------
 
         """
+        # encode source
+        context, decoder_initial_state, attention_states = self.encode(source, source_r)
+        # decode target
+        outputs, states = self.decode(target, decoder_initial_state, attention_states, do_decode)
+
+        # return the output (logits) and internal states
+        return outputs, states
+
+    def encode(self, source, source_r):
+
         # encoder embedding layer and bi-directional recurrent layer
         with tf.name_scope('bidirectional_encoder') as scope:
             context, decoder_initial_state = nmt.bidirectional_encoder(
@@ -362,6 +406,16 @@ class NMTModel(object):
                 self.encoder_cell, self.encoder_cell_r, self.encoder_size,
                 self.batch_size, dtype=self.dtype
             )
+
+            # First calculate a concatenation of encoder outputs to put attention on.
+            top_states = [
+                tf.reshape(e, [-1, 1, self.encoder_size * 2]) for e in context
+                ]
+            attention_states = tf.concat(1, top_states)
+
+        return context, decoder_initial_state, attention_states
+
+    def decode(self, target, decoder_initial_state, attention_states, do_decode=False):
 
         # decoder with attention
         with tf.name_scope('decoder_with_attention') as scope:
@@ -372,17 +426,6 @@ class NMTModel(object):
                 ),
                 name='embedding'
             )
-
-            # First calculate a concatenation of encoder outputs to put attention on.
-            top_states = [
-                tf.reshape(e, [-1, 1, self.encoder_size * 2]) for e in context
-                ]
-            attention_states = tf.concat(1, top_states)
-
-            # print 'Context Shape: ' + str(context[0].get_shape())
-            # print 'Top states shape: ' + str(top_states[0].get_shape())
-            # print 'Attention states shape:' + str(attention_states.get_shape())
-            # print '\n'
 
             # run the decoder with attention
             outputs, states = seq2seq.embedding_attention_decoder(

@@ -204,8 +204,7 @@ def train():
         current_step = 0
         previous_losses = []
         total_loss = 0.0
-        epoch = 1  # we start with the first epoch
-        while epoch < FLAGS.max_epochs:
+        while model.epoch.eval() < FLAGS.max_epochs:
             # Choose a bucket according to data distribution. We pick a random number
             # in [0, 1] and use the corresponding interval in train_buckets_scale.
             random_number_01 = numpy.random.random_sample()
@@ -232,7 +231,7 @@ def train():
 
             if current_step % FLAGS.steps_verbosity == 0:
                 print('epoch %d global step %d learning rate %.4f step-time %.2f avg. loss %.8f' %
-                      (epoch, model.global_step.eval(), model.learning_rate.eval(),
+                      (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
                        step_time, total_loss / current_step))
 
             # Once in a while, we save checkpoint, print statistics, and run evals.

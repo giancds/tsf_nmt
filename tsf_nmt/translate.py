@@ -24,34 +24,38 @@ import numpy
 import tensorflow as tf
 from tensorflow.python.platform import gfile
 import data_utils
-import nmt_model
+import nmt_models
 
 # flags related to the model optimization
-tf.app.flags.DEFINE_float('learning_rate', 1e-4, 'Learning rate.')
-tf.app.flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by this much.')
-tf.app.flags.DEFINE_string('optimizer', 'adam',
+tf.app.flags.DEFINE_float('learning_rate', 1.0, 'Learning rate.')
+tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decays by this much.')
+tf.app.flags.DEFINE_integer('start_decay', 5, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
+tf.app.flags.DEFINE_string('optimizer', 'sgd',
                            'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
 tf.app.flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 tf.app.flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
 tf.app.flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
-tf.app.flags.DEFINE_integer('max_epochs', 1000, 'Batch size to use during training.')
+tf.app.flags.DEFINE_integer('max_epochs', 10, 'Batch size to use during training.')
 tf.app.flags.DEFINE_integer('max_train_data_size', 0,
                             'Limit on the size of training data (0: no limit).')
 
 # flags related to model architecture
+tf.app.flags.DEFINE_string('model', 'seq2seq', 'one of these 2 models: seq2seq or bidirectional')
+tf.app.flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
 tf.app.flags.DEFINE_integer('source_proj_size', 10, 'Size of source words projection.')
 tf.app.flags.DEFINE_integer('target_proj_size', 10, 'Size of target words projection.')
-tf.app.flags.DEFINE_integer('encoder_size', 100, 'Size of each encoder layer.')
-tf.app.flags.DEFINE_integer('decoder_size', 100, 'Size of each decoderlayer.')
-tf.app.flags.DEFINE_integer('num_layers', 1, 'Number of layers in each component of the model.')
+tf.app.flags.DEFINE_integer('encoder_size', 30, 'Size of each encoder layer.')
+tf.app.flags.DEFINE_integer('decoder_size', 30, 'Size of each decoder layer.')
+tf.app.flags.DEFINE_integer('num_layers_encoder', 1, 'Number of layers in the encoder component the model.')
+tf.app.flags.DEFINE_integer('num_layers_decoder', 1, 'Number of layers in the decoder component of the model.')
 
 # flags related to the source and target vocabularies
 tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.')
 tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-tf.app.flags.DEFINE_string('model_name', 'model_hid100_proj10_en30000_pt30000_sgd07.ckpt', 'Data directory')
+tf.app.flags.DEFINE_string('model_name', 'model_lstm_hid500_proj100_en30000_pt30000_sgd1.0.ckpt', 'Data directory')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
 tf.app.flags.DEFINE_string('train_dir', '/home/gian/train/', 'Data directory')
 tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
@@ -105,6 +109,10 @@ def read_data(source_path, target_path, max_size=None):
     """
     data_set = [[] for _ in _buckets]
     counter = 0
+    if FLAGS.model is 'bidirectional':
+        bidirectional = True
+    else:
+        bidirectional = False
     with gfile.GFile(source_path, mode='r') as source_file:
         with gfile.GFile(target_path, mode='r') as target_file:
             source, target = source_file.readline(), target_file.readline()
@@ -115,12 +123,16 @@ def read_data(source_path, target_path, max_size=None):
                     print('  reading data line %d' % counter)
                     sys.stdout.flush()
                 source_ids = [int(x) for x in source.split()]
-                source_ids_r = source_ids[::-1]
+                if bidirectional:
+                    source_ids_r = source_ids[::-1]
                 target_ids = [int(x) for x in target.split()]
                 target_ids.append(data_utils.EOS_ID)
                 for bucket_id, (source_size, target_size) in enumerate(_buckets):
                     if len(source_ids) < source_size and len(target_ids) < target_size:
-                        data_set[bucket_id].append([source_ids, source_ids_r, target_ids])
+                        if bidirectional:
+                            data_set[bucket_id].append([source_ids, source_ids_r, target_ids])
+                        else:
+                            data_set[bucket_id].append([source_ids, target_ids])
                         break
                 source, target = source_file.readline(), target_file.readline()
     return data_set
@@ -143,21 +155,40 @@ def create_model(session, forward_only):
     else:
         batch = FLAGS.batch_size
 
-    model = nmt_model.NMTBidirectionalModel(source_vocab_size=FLAGS.src_vocab_size,
-                                            target_vocab_size=FLAGS.tgt_vocab_size,
-                                            buckets=_buckets,
-                                            source_proj_size=FLAGS.source_proj_size,
-                                            target_proj_size=FLAGS.target_proj_size,
-                                            encoder_size=FLAGS.encoder_size,
-                                            decoder_size=FLAGS.decoder_size,
-                                            num_layers=FLAGS.num_layers,
-                                            max_gradient_norm=FLAGS.max_gradient_norm,
-                                            batch_size=batch,
-                                            learning_rate=FLAGS.learning_rate,
-                                            learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
-                                            optimizer=FLAGS.optimizer,
-                                            use_lstm=False,
-                                            forward_only=forward_only)
+    if FLAGS.model is 'seq2seq':
+        model = nmt_models.Seq2SeqModel(source_vocab_size=FLAGS.src_vocab_size,
+                                        target_vocab_size=FLAGS.tgt_vocab_size,
+                                        buckets=_buckets,
+                                        source_proj_size=FLAGS.source_proj_size,
+                                        target_proj_size=FLAGS.target_proj_size,
+                                        encoder_size=FLAGS.encoder_size,
+                                        decoder_size=FLAGS.decoder_size,
+                                        num_layers_encoder=FLAGS.num_layers_encoder,
+                                        num_layers_decoder=FLAGS.num_layers_decoder,
+                                        max_gradient_norm=FLAGS.max_gradient_norm,
+                                        batch_size=batch,
+                                        learning_rate=FLAGS.learning_rate,
+                                        learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
+                                        optimizer=FLAGS.optimizer,
+                                        use_lstm=FLAGS.use_lstm,
+                                        forward_only=forward_only)
+    elif FLAGS.model is 'bidirectional':
+        model = nmt_models.NMTBidirectionalModel(source_vocab_size=FLAGS.src_vocab_size,
+                                                 target_vocab_size=FLAGS.tgt_vocab_size,
+                                                 buckets=_buckets,
+                                                 source_proj_size=FLAGS.source_proj_size,
+                                                 target_proj_size=FLAGS.target_proj_size,
+                                                 encoder_size=FLAGS.encoder_size,
+                                                 decoder_size=FLAGS.decoder_size,
+                                                 max_gradient_norm=FLAGS.max_gradient_norm,
+                                                 batch_size=batch,
+                                                 learning_rate=FLAGS.learning_rate,
+                                                 learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
+                                                 optimizer=FLAGS.optimizer,
+                                                 use_lstm=FLAGS.use_lstm,
+                                                 forward_only=forward_only)
+    else:
+        raise ValueError('Wrong model type!')
 
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
     if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
@@ -172,7 +203,7 @@ def create_model(session, forward_only):
 def train():
     """Train a source->target translation model using some bilingual data."""
     # Prepare WMT data.
-    print('Preparing WMT data in %s' % FLAGS.data_dir)
+    print('Preparing data in %s' % FLAGS.data_dir)
     src_train, tgt_train, src_dev, tgt_dev, src_test, tgt_test = data_utils.prepare_data(FLAGS)
 
     # summary_op = tf.merge_all_summaries()
@@ -213,26 +244,49 @@ def train():
 
             # Get a batch and make a step.
             start_time = time.time()
-            encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights = model.get_batch(
-                train_set, bucket_id
-            )
-            _, step_loss, _ = model.step(sess, encoder_inputs, encoder_inputs_r, decoder_inputs,
-                                         target_weights, bucket_id, False)
+
+            if FLAGS.model is 'bidirectional':
+                encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights = model.get_batch(
+                        train_set, bucket_id
+                )
+                _, step_loss, _ = model.step(sess, encoder_inputs, encoder_inputs_r, decoder_inputs,
+                                             target_weights, bucket_id, False)
+            else:
+                encoder_inputs, decoder_inputs, target_weights = model.get_batch(
+                        train_set, bucket_id
+                )
+                _, step_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
+                                             target_weights, bucket_id, False)
+
+            currloss = model.current_loss.eval()
+            sess.run(model.current_loss.assign(currloss + step_loss))
+
+            # increase the number of seen samples
+            sess.run(model.samples_seen_update_op)
+            # sess.run(model.current_loss_update_op)
+
+            # update epoch number
+            if model.samples_seen.eval() >= train_total_size:
+                sess.run(model.epoch_update_op)
+                sess.run(model.samples_seen_reset_op)
+                if FLAGS.start_decay > 0:
+                    if model.epoch.eval() >= FLAGS.start_decay:
+                        sess.run(model.learning_rate_decay_op)
+
             step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
             loss += step_loss / FLAGS.steps_per_checkpoint
-            current_step += 1
-            # if current_step % train_total_size == 0:
-            #     epoch += 1
-            batch_size = model.batch_size
-            # update epoch number
-            if (train_total_size - (current_step * batch_size)) < batch_size:
-                sess.run(model.epoch_update_op)
+            current_step = model.global_step.eval()
+
             total_loss += step_loss
 
             if current_step % FLAGS.steps_verbosity == 0:
+                closs = model.current_loss.eval()
+                gstep = model.global_step.eval()
+                avgloss = closs / gstep
+                sess.run(model.avg_loss.assign(avgloss))
                 print('epoch %d global step %d learning rate %.4f step-time %.2f avg. loss %.8f' %
                       (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
-                       step_time, total_loss / current_step))
+                       step_time, model.avg_loss.eval()))
 
             # Once in a while, we save checkpoint, print statistics, and run evals.
             if current_step % FLAGS.steps_per_checkpoint == 0:
@@ -244,9 +298,10 @@ def train():
                 #                 step_time, perplexity))
 
                 # Decrease learning rate if no improvement was seen over last n times.
-                prevs = FLAGS.lr_rate_patience
-                if len(previous_losses) > (prevs - 1) and loss > max(previous_losses[-prevs:]):
-                    sess.run(model.learning_rate_decay_op)
+                if FLAGS.start_decay == 0:
+                    prevs = FLAGS.lr_rate_patience
+                    if len(previous_losses) > (prevs - 1) and loss > max(previous_losses[-prevs:]):
+                        sess.run(model.learning_rate_decay_op)
                 previous_losses.append(loss)
 
                 # Save checkpoint and zero timer and loss.
@@ -265,12 +320,18 @@ def train():
 
                 # Run evals on development set and print their perplexity.
                 for bucket_id in xrange(len(_buckets)):
-                    encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights = \
-                        model.get_batch(dev_set, bucket_id)
-                    _, eval_loss, _ = model.step(
-                        sess, encoder_inputs, encoder_inputs_r, decoder_inputs,
-                        target_weights, bucket_id, True
-                    )
+
+                    if FLAGS.model is 'bidirectional':
+                        encoder_inputs, encoder_inputs_r, decoder_inputs, target_weights = \
+                            model.get_batch(dev_set, bucket_id)
+                        _, eval_loss, _ = model.step(
+                            sess, encoder_inputs, encoder_inputs_r, decoder_inputs,
+                            target_weights, bucket_id, True
+                        )
+                    else:
+                        encoder_inputs, decoder_inputs, target_weights = model.get_batch(dev_set, bucket_id)
+                        _, eval_loss, _ = model.step( sess, encoder_inputs, decoder_inputs,
+                                                      target_weights, bucket_id, True)
 
                     total_eval_loss += eval_loss
 
@@ -457,7 +518,7 @@ def decode_from_file(file_path):
                         model.get_batch({bucket_id: [(token_ids, token_ids[::-1], [])]}, bucket_id)
 
                     # Get output logits for the sentence.
-                    output_logits = model.step(sess, encoder_inputs, encoder_inputs_r,
+                    _, _, output_logits = model.step(sess, encoder_inputs, encoder_inputs_r,
                                                decoder_inputs,
                                                target_weights, bucket_id, True)
 

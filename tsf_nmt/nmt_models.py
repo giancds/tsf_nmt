@@ -24,7 +24,9 @@ def _decode(target,
             target_vocab_size,
             target_proj_size,
             output_projection,
+            batch_size,
             do_decode=False,
+            local_attention=None,
             dtype=tf.float32):
 
     # decoder with attention
@@ -40,9 +42,10 @@ def _decode(target,
         # run the decoder with attention
         outputs, states = nmt.embedding_attention_decoder(
                 target, decoder_initial_state, attention_states,
-                decoder_cell, target_vocab_size, num_heads=1,
+                decoder_cell, batch_size, target_vocab_size, num_heads=1,
                 output_size=None, output_projection=output_projection,
-                feed_previous=do_decode, dtype=dtype, scope='decoder_with_attention'
+                feed_previous=do_decode, local_attention=local_attention,
+                dtype=dtype, scope='decoder_with_attention'
         )
 
     return outputs, states
@@ -141,6 +144,7 @@ class NMTBidirectionalModel(object):
                  learning_rate_decay_factor,
                  optimizer='sgd',
                  use_lstm=False,
+                 local_attention=False,
                  num_samples=512,
                  forward_only=False,
                  dtype=tf.float32):
@@ -170,17 +174,22 @@ class NMTBidirectionalModel(object):
         self.target_vocab_size = target_vocab_size
         self.buckets = buckets
         self.batch_size = batch_size
+        self.local_attention = local_attention
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
         self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
+
         # epoch ops
         self.epoch = tf.Variable(0, trainable=False)
         self.epoch_update_op = self.epoch.assign(self.epoch + 1)
+
         # samples seen ops
         self.samples_seen = tf.Variable(0, trainable=False)
         self.samples_seen_update_op = self.samples_seen.assign(self.samples_seen + batch_size)
         self.samples_seen_reset_op = self.samples_seen.assign(0)
+
         # global step variable - controled by the model
         self.global_step = tf.Variable(0.0, trainable=False)
+
         # average loss ops
         self.current_loss = tf.Variable(0.0, trainable=False)
         self.current_loss_update_op = None
@@ -203,6 +212,7 @@ class NMTBidirectionalModel(object):
         # If we use sampled softmax, we need an output projection.
         self.output_projection = None
         softmax_loss_function = None
+
         # Sampled softmax only makes sense if we sample less than vocabulary size.
         if 0 < num_samples < self.target_vocab_size:
             with tf.device("/cpu:0"):
@@ -223,6 +233,7 @@ class NMTBidirectionalModel(object):
         self.encoder_cell = cells.GRU(self.source_proj_size, encoder_size)
         self.encoder_cell_r = cells.GRU(self.source_proj_size, encoder_size)
         self.decoder_cell = cells.GRU(self.target_proj_size, decoder_size)
+
         if use_lstm:
             self.encoder_cell = rnn_cell.LSTMCell(encoder_size, input_size=self.source_proj_size)
             self.encoder_cell_r = rnn_cell.LSTMCell(encoder_size, input_size=self.source_proj_size)
@@ -512,7 +523,8 @@ class NMTBidirectionalModel(object):
         # decode target
         outputs, states = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
                                   self.target_vocab_size, self.target_proj_size, self.output_projection,
-                                  do_decode=do_decode, dtype=self.dtype)
+                                  batch_size=self.batch_size, do_decode=do_decode,
+                                  local_attention=self.local_attention, dtype=self.dtype)
 
         # return the output (logits) and internal states
         return outputs, states
@@ -566,6 +578,7 @@ class Seq2SeqModel(object):
                  learning_rate_decay_factor,
                  optimizer='sgd',
                  use_lstm=False,
+                 local_attention=False,
                  num_samples=512,
                  forward_only=False,
                  dtype=tf.float32):
@@ -594,6 +607,7 @@ class Seq2SeqModel(object):
         self.target_vocab_size = target_vocab_size
         self.buckets = buckets
         self.batch_size = batch_size
+        self.local_attention = local_attention
         # learning rate ops
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
         self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
@@ -849,8 +863,6 @@ class Seq2SeqModel(object):
         ----------
         source: Tensor
             a Tensor corresponding to the source sentence
-        source_r: Tensor
-            a Tensor corresponding to the reversed source sentence
         target: Tensor
             A Tensor corresponding to the target sentence
         do_decode: boolean
@@ -866,6 +878,7 @@ class Seq2SeqModel(object):
         # decode target
         outputs, states = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
                                   self.target_vocab_size, self.target_proj_size, self.output_projection,
+                                  batch_size=self.batch_size, local_attention=self.local_attention,
                                   do_decode=do_decode, dtype=self.dtype)
 
         # return the output (logits) and internal states
@@ -876,8 +889,8 @@ class Seq2SeqModel(object):
         # encoder embedding layer and bi-directional recurrent layer
         with tf.name_scope('bidirectional_encoder') as scope:
             context, decoder_initial_state = nmt.reverse_encoder(
-                    source, self.source_vocab_size, self.source_proj_size,
-                    self.src_embedding, self.encoder_cell, self.batch_size, dtype=self.dtype)
+                    source, self.src_embedding, self.encoder_cell,
+                    self.batch_size, dtype=self.dtype)
 
             # First calculate a concatenation of encoder outputs to put attention on.
             top_states = [

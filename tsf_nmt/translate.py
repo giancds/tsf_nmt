@@ -1,4 +1,19 @@
 # -*- coding: utf-8 -*-
+
+# Copyright 2015 Google Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
 """Binary for training translation models and decoding from them.
 
 Running this program without --decode will download the WMT corpus into
@@ -29,7 +44,7 @@ import nmt_models
 # flags related to the model optimization
 tf.app.flags.DEFINE_float('learning_rate', 1.0, 'Learning rate.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decays by this much.')
-tf.app.flags.DEFINE_integer('start_decay', 5, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
+tf.app.flags.DEFINE_integer('start_decay', 4, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
 tf.app.flags.DEFINE_string('optimizer', 'sgd',
                            'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
@@ -42,22 +57,23 @@ tf.app.flags.DEFINE_integer('max_train_data_size', 0,
 
 # flags related to model architecture
 tf.app.flags.DEFINE_string('model', 'seq2seq', 'one of these 2 models: seq2seq or bidirectional')
+tf.app.flags.DEFINE_boolean('local_attention', True, 'Whether to use local attention (or global attention).')
 tf.app.flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
-tf.app.flags.DEFINE_integer('source_proj_size', 10, 'Size of source words projection.')
-tf.app.flags.DEFINE_integer('target_proj_size', 10, 'Size of target words projection.')
-tf.app.flags.DEFINE_integer('encoder_size', 30, 'Size of each encoder layer.')
-tf.app.flags.DEFINE_integer('decoder_size', 30, 'Size of each decoder layer.')
-tf.app.flags.DEFINE_integer('num_layers_encoder', 1, 'Number of layers in the encoder component the model.')
-tf.app.flags.DEFINE_integer('num_layers_decoder', 1, 'Number of layers in the decoder component of the model.')
+tf.app.flags.DEFINE_integer('source_proj_size', 100, 'Size of source words projection.')
+tf.app.flags.DEFINE_integer('target_proj_size', 100, 'Size of target words projection.')
+tf.app.flags.DEFINE_integer('encoder_size', 200, 'Size of each encoder layer.')
+tf.app.flags.DEFINE_integer('decoder_size', 200, 'Size of each decoder layer.')
+tf.app.flags.DEFINE_integer('num_layers_encoder', 4, 'Number of layers in the encoder component the model.')
+tf.app.flags.DEFINE_integer('num_layers_decoder', 4, 'Number of layers in the decoder component of the model.')
 
 # flags related to the source and target vocabularies
 tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.')
 tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-tf.app.flags.DEFINE_string('model_name', 'model_lstm_hid500_proj100_en30000_pt30000_sgd1.0.ckpt', 'Data directory')
+tf.app.flags.DEFINE_string('model_name', 'model_local_lstm_hid300_proj100_en30000_pt30000_sgd1.0.ckpt', 'Data directory')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-tf.app.flags.DEFINE_string('train_dir', '/home/gian/train/', 'Data directory')
+tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_local/', 'Train directory')
 tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 tf.app.flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
 tf.app.flags.DEFINE_string('test_data', 'fapesp-v2.pt-en.test-a.tok.%s', 'Data for testing.')
@@ -88,6 +104,7 @@ FLAGS = tf.app.flags.FLAGS
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
+# _buckets = [(40, 50)]
 
 
 def read_data(source_path, target_path, max_size=None):
@@ -171,6 +188,7 @@ def create_model(session, forward_only):
                                         learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
                                         optimizer=FLAGS.optimizer,
                                         use_lstm=FLAGS.use_lstm,
+                                        local_attention=FLAGS.local_attention,
                                         forward_only=forward_only)
     elif FLAGS.model is 'bidirectional':
         model = nmt_models.NMTBidirectionalModel(source_vocab_size=FLAGS.src_vocab_size,
@@ -186,6 +204,7 @@ def create_model(session, forward_only):
                                                  learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
                                                  optimizer=FLAGS.optimizer,
                                                  use_lstm=FLAGS.use_lstm,
+                                                 local_attention=FLAGS.local_attention,
                                                  forward_only=forward_only)
     else:
         raise ValueError('Wrong model type!')

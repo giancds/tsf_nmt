@@ -51,7 +51,7 @@ tf.app.flags.DEFINE_string('optimizer', 'sgd',
 tf.app.flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 tf.app.flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
 tf.app.flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
-tf.app.flags.DEFINE_integer('max_epochs', 10, 'Batch size to use during training.')
+tf.app.flags.DEFINE_integer('max_epochs', 10, 'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
 tf.app.flags.DEFINE_integer('max_train_data_size', 0,
                             'Limit on the size of training data (0: no limit).')
 
@@ -71,7 +71,7 @@ tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary
 tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-tf.app.flags.DEFINE_string('model_name', 'model_local_lstm_hid300_proj100_en30000_pt30000_sgd1.0.ckpt', 'Data directory')
+tf.app.flags.DEFINE_string('model_name', 'model_local_lstm_hid200_proj100_en30000_pt30000_sgd1.0.ckpt', 'Data directory')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
 tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_local/', 'Train directory')
 tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')

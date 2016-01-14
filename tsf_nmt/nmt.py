@@ -16,9 +16,9 @@ FLAGS = flags.FLAGS
 
 
 def embedding_attention_decoder(decoder_inputs, initial_state, attention_states, cell,
-                                batch_size, num_symbols, num_heads=1,  window_size=10,
-                                output_size=None, output_projection=None,
-                                feed_previous=False, local_attention=False,
+                                batch_size, num_symbols, window_size=10,
+                                output_size=None, output_projection=None, input_feeding=False,
+                                feed_previous=False, attention_type=None, content_function='vinyals_kayser',
                                 dtype=dtypes.float32, scope=None):
     """RNN decoder with embedding and attention and a pure-decoding option.
 
@@ -41,7 +41,7 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
         In effect, this implements a greedy decoder. It can also be used
         during training to emulate http://arxiv.org/pdf/1506.03099v2.pdf.
         If False, decoder_inputs are used as given (the standard decoder case).
-      local_attention:
+      attention_type:
       dtype: The dtype to use for the RNN initial states (default: tf.float32).
       scope: VariableScope for the created subgraph; defaults to
         "embedding_attention_decoder".
@@ -56,6 +56,9 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
     Raises:
       ValueError: when output_projection has the wrong shape.
     """
+
+    assert attention_type is not None
+
     if output_size is None:
         output_size = cell.output_size
     if output_projection is not None:
@@ -74,7 +77,9 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
             if output_projection is not None:
                 prev = nn_ops.xw_plus_b(
                         prev, output_projection[0], output_projection[1])
-            prev_symbol = array_ops.stop_gradient(math_ops.argmax(prev, 1))
+            prev = array_ops.stop_gradient(math_ops.argmax(prev, 1))
+            # x, prev_symbol = nn_ops.top_k(prev, 12)
+            prev_symbol = array_ops.stop_gradient(prev)
             emb_prev = embedding_ops.embedding_lookup(embedding, prev_symbol)
             return emb_prev
 
@@ -86,13 +91,14 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
             embedding_ops.embedding_lookup(embedding, i) for i in decoder_inputs]
 
         return _attention_decoder(
-                    emb_inp, initial_state, attention_states, cell, batch_size, local_attention=local_attention,
-                    output_size=output_size, num_heads=num_heads, loop_function=loop_function, window_size=window_size)
+                    emb_inp, initial_state, attention_states, cell, batch_size, attention_type=attention_type,
+                    output_size=output_size, loop_function=loop_function, window_size=window_size,
+                    input_feeding=input_feeding)
 
 
-def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, batch_size, local_attention=False,
-                       output_size=None, num_heads=1, loop_function=None, window_size=10,
-                       dtype=dtypes.float32, scope=None):
+def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, batch_size, attention_type=False,
+                       output_size=None, loop_function=None, window_size=10, input_feeding=False,
+                       content_function='vinyals_kayser', dtype=dtypes.float32, scope=None):
     """RNN decoder with local attention for the sequence-to-sequence model.
 
     Args:
@@ -146,41 +152,43 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
         # To calculate W1 * h_t we use a 1-by-1 convolution, need to reshape before.
         hidden = array_ops.reshape(
                 attention_states, [-1, attn_length, 1, attn_size])
-        hidden_features = []
 
-        va = []
         attention_vec_size = attn_size  # Size of query vectors for attention.
 
-        for a in xrange(num_heads):
-            # here we calculate the W_a * s_i-1 (W1 * h_1) part of the attention alignment
-            k = vs.get_variable("AttnW_%d" % a, [1, 1, attn_size, attention_vec_size])
-            conv = nn_ops.conv2d(hidden, k, [1, 1, 1, 1], "SAME")
-            hidden_features.append(conv)
-            va.append(vs.get_variable("AttnV_%d" % a, [attention_vec_size]))
+        # for a in xrange(num_heads):
+        # here we calculate the W_a * s_i-1 (W1 * h_1) part of the attention alignment
+        k = vs.get_variable("AttnW_%d" % 0, [1, 1, attn_size, attention_vec_size])
+        conv = nn_ops.conv2d(hidden, k, [1, 1, 1, 1], "SAME")
+        hidden_features = conv
+        va = vs.get_variable("AttnV_%d" % 0, [attention_vec_size])
 
         states = [initial_state]
 
         outputs = []
         prev = None
         batch_attn_size = array_ops.pack([batch, attn_size])
-        attns = [array_ops.zeros(batch_attn_size, dtype=dtype)
-                 for _ in xrange(num_heads)]
 
-        for a in attns:  # Ensure the second shape of attention vectors is set.
-            a.set_shape([None, attn_size])
+        # initial attention state
+        attns = array_ops.zeros(batch_attn_size, dtype=dtype)
+        attns.set_shape([None, attn_size])
 
         for i in xrange(len(decoder_inputs)):
             if i > 0:
                 vs.get_variable_scope().reuse_variables()
-            inp = decoder_inputs[i]
+
+            if input_feeding:
+                # if using input_feeding, concatenate previous attention with input to layers
+                inp = array_ops.concat(1, [decoder_inputs[i], attns])
+            else:
+                inp = decoder_inputs[i]
 
             # If loop_function is set, we use it instead of decoder_inputs.
             if loop_function is not None and prev is not None:
                 with vs.variable_scope("loop_function", reuse=True):
-                    inp = array_ops.stop_gradient(loop_function(prev, i))
+                    inp = array_ops.stop_gradient(loop_function(prev, 12))
 
             # Merge input and previous attentions into one vector of the right size.
-            x = rnn_cell.linear([inp] + attns, cell.input_size, True)
+            x = rnn_cell.linear([inp] + [attns], cell.input_size, True)
 
             # Run the RNN.
             cell_output, new_state = cell(x, states[-1])
@@ -188,22 +196,27 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
 
             dt = new_state
 
-            attns = None
-
-            if local_attention:
-                # Run the attention mechanism.
-                attns = _local_attention(decoder_hidden_state=dt, num_heads=num_heads, hidden_features=hidden_features,
+            # Run the attention mechanism.
+            if attention_type is 'local':
+                attns = _local_attention(decoder_hidden_state=dt, hidden_features=hidden_features,
                                          va=va, hidden_attn=hidden, attention_vec_size=attention_vec_size,
                                          attn_length=attn_length, attn_size=attn_size, batch_size=batch_size,
                                          window_size=window_size, dtype=dtype)
-            else:
-                attns = _global_attention(decoder_hidden_state=new_state, num_heads=num_heads,
-                                      hidden_features=hidden_features, v=va, hidden_attn=hidden,
-                                      attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                      attn_size=attn_size)
+
+            elif attention_type is 'global':
+                attns = _global_attention(decoder_hidden_state=dt,
+                                          hidden_features=hidden_features, v=va, hidden_attn=hidden,
+                                          attention_vec_size=attention_vec_size, attn_length=attn_length,
+                                          attn_size=attn_size)
+
+            else:  # here we choose the hybrid mechanism
+                attns = _hybrid_attention(decoder_hidden_state=dt, hidden_features=hidden_features,
+                                          va=va, hidden_attn=hidden, attention_vec_size=attention_vec_size,
+                                          attn_length=attn_length, attn_size=attn_size, batch_size=batch_size,
+                                          window_size=window_size, dtype=dtype)
 
             with vs.variable_scope("AttnOutputProjection"):
-                output = rnn_cell.linear([cell_output] + attns, output_size, True)
+                output = rnn_cell.linear([cell_output] + [attns], output_size, True)
 
             if loop_function is not None:
                 # We do not propagate gradients over the loop function.
@@ -214,30 +227,87 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
     return outputs, states
 
 
-def _global_attention(decoder_hidden_state, num_heads, hidden_features, v, hidden_attn, attention_vec_size, attn_length,
-                      attn_size):
+def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, attention_vec_size,
+                      attn_length, attn_size, batch_size, window_size=10, content_function='vinyals_kayser',
+                      dtype=dtypes.float32):
+
+    local_attn = _local_attention(decoder_hidden_state=decoder_hidden_state,
+                                  hidden_features=hidden_features, va=va, hidden_attn=hidden_attn,
+                                  attention_vec_size=attention_vec_size, attn_length=attn_length,
+                                  attn_size=attn_size, batch_size=batch_size,
+                                  window_size=window_size, dtype=dtype)
+
+    global_attn = _global_attention(decoder_hidden_state=decoder_hidden_state,
+                                    hidden_features=hidden_features, v=va, hidden_attn=hidden_attn,
+                                    attention_vec_size=attention_vec_size, attn_length=attn_length,
+                                    attn_size=attn_size)
+
+    with vs.variable_scope("FeedbackGate_%d" % 0):
+        y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
+        y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
+
+        vb = vs.get_variable("FeedbackVb_%d" % 0, [attention_vec_size])
+
+        # tanh(Wp*ht)
+        tanh = math_ops.tanh(y)
+        beta = math_ops.sigmoid(math_ops.reduce_sum((vb * tanh), [2, 3]))
+
+        attns = beta * global_attn + (1 - beta) * local_attn
+
+    return attns
+
+
+def _global_attention(decoder_hidden_state, hidden_features, v, hidden_attn, attention_vec_size, attn_length,
+                      attn_size, content_function='vinyals_kayser'):
     """Put attention masks on hidden using hidden_features and query."""
-    ds = []  # Results of attention reads will be stored here.
-    for a in xrange(num_heads):
-        with vs.variable_scope("Attention_%d" % a):
+
+    with vs.variable_scope("Attention_%d" % 0):
+
+        if content_function is 'vinyals_kayser':
             y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
             y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
 
             # Attention mask is a softmax of v^T * tanh(...).
-            s = math_ops.reduce_sum(v[a] * math_ops.tanh(hidden_features[a] + y), [2, 3])
-            a = nn_ops.softmax(s)
+            s = math_ops.reduce_sum(v * math_ops.tanh(hidden_features + y), [2, 3])
 
-            # Now calculate the attention-weighted vector d.
-            d = math_ops.reduce_sum(
-                    array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden_attn,
-                    [1, 2])
-            ds.append(array_ops.reshape(d, [-1, attn_size]))
+        elif content_function is 'luong_general':
+
+            _, _, _, h4 = tf.split(1, 4, decoder_hidden_state)
+            _, state = tf.split(1, 2, h4)
+
+            s = math_ops.reduce_sum((hidden_features * hidden_features), [2, 3])
+
+        a = nn_ops.softmax(s)
+
+        # Now calculate the attention-weighted vector d.
+        d = math_ops.reduce_sum(
+                array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden_attn,
+                [1, 2])
+        ds = array_ops.reshape(d, [-1, attn_size])
 
     return ds
 
 
-def _local_attention(decoder_hidden_state, num_heads, hidden_features, va, hidden_attn, attention_vec_size,
-                     attn_length, attn_size, batch_size, window_size=10, dtype=dtypes.float32):
+def _vinyals_kayser(decoder_hidden_state, hidden_features, v, attention_vec_size):
+    y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
+    y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
+
+    # Attention mask is a softmax of v^T * tanh(...).
+    s = math_ops.reduce_sum(v * math_ops.tanh(hidden_features + y), [2, 3])
+
+    return s
+
+
+def _luong_general(decoder_hidden_state, hidden_features, v, attention_vec_size):
+    _, _, _, h4 = tf.split(1, 4, decoder_hidden_state)
+    _, state = tf.split(1, 2, h4)
+    s = math_ops.reduce_sum((hidden_features * hidden_features), [2, 3])
+    return s
+
+
+def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, attention_vec_size,
+                     attn_length, attn_size, batch_size, window_size=10, content_function='vinyals_kayser',
+                    dtype=dtypes.float32):
     """Put attention masks on hidden using hidden_features and query.
     Parameters
     ----------
@@ -247,18 +317,19 @@ def _local_attention(decoder_hidden_state, num_heads, hidden_features, va, hidde
     -------
 
     """
-    ds = []  # Results of attention reads will be stored here.
 
     sigma = window_size / 2
     denominator = sigma ** 2
 
-    for a in xrange(num_heads):
-        with vs.variable_scope("Attention_%d" % a):
+    with vs.variable_scope("AttentionLocal_%d" % 0):
+
+        if content_function is 'vinyals_kayser':
 
             # this code calculate the W2*dt part of the equation - we do this here because we need
             # to obtain the current hidden states from the decoder
             linear_trans = rnn_cell.linear([decoder_hidden_state, decoder_hidden_state], attention_vec_size * 2, True)
             y, ht = tf.split(1, 2, linear_trans)
+
             y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
             ht = array_ops.reshape(ht, [-1, 1, 1, attention_vec_size])
 
@@ -266,215 +337,81 @@ def _local_attention(decoder_hidden_state, num_heads, hidden_features, va, hidde
             # reduce_sum is representing the + of (W1*h_1 + W2*decoder_hidden_state)
             # W1*h1 = hidden_features
             # W2*dt = y
-            s = math_ops.reduce_sum(va[a] * math_ops.tanh(hidden_features[a] + y), [2, 3])
-            soft = nn_ops.softmax(s)
+            s = math_ops.reduce_sum(va * math_ops.tanh(hidden_features + y), [2, 3])
 
-            # get the parameters (vp)
-            vp = vs.get_variable("AttnVp_%d" % a, [attention_vec_size])
+        elif content_function is 'luong_general':
 
-            # tanh(Wp*ht)
-            tanh = math_ops.tanh(ht)
-            # S * sigmoid(vp * tanh(Wp*ht))  - this is going to return a number
-            # for each sentence in the batch - i.e., a tensor of shape batch x 1
-            S = attn_length
-            pt = math_ops.reduce_sum((vp * tanh), [2, 3])
-            pt = pt * S
+            ht = rnn_cell.linear([decoder_hidden_state], attention_vec_size, True)
 
-            # now we get only the integer part of the values
-            pt = tf.floor(pt)
+            _, _, _, h4 = tf.split(1, 4, decoder_hidden_state)
+            _, state = tf.split(1, 2, h4)
 
-            # we now create a tensor containing the indices representing each position
-            # of the sentence - i.e., if the sentence contain 5 tokens and batch_size is 3,
-            # the resulting tensor will be:
-            # [[0, 1, 2, 3, 4]
-            #  [0, 1, 2, 3, 4]
-            #  [0, 1, 2, 3, 4]]
-            #
-            indices = []
-            for pos in xrange(attn_length):
-                indices.append(pos)
-            indices = indices * batch_size
-            idx = tf.convert_to_tensor(indices, dtype=dtype)
-            idx = tf.reshape(idx, [batch_size, attn_length])
+            s = math_ops.reduce_sum((hidden_features * hidden_features), [2, 3])
 
-            # here we calculate the boundaries of the attention window based on the ppositions
-            low = pt - window_size + 1  # we add one because the floor op already generates the first position
-            high = pt + window_size
+        soft = nn_ops.softmax(s)
 
-            # here we check our positions against the boundaries
-            mlow = tf.to_float(idx < low)
-            mhigh = tf.to_float(idx > high)
+        # get the parameters (vp)
+        vp = vs.get_variable("AttnVp_%d" % 0, [attention_vec_size])
 
-            # now we combine both into a pre-mask that has 0s and 1s switched
-            # i.e, at this point, True == 0 and False == 1
-            m = mlow + mhigh  # batch_size
+        # tanh(Wp*ht)
+        tanh = math_ops.tanh(ht)
+        # S * sigmoid(vp * tanh(Wp*ht))  - this is going to return a number
+        # for each sentence in the batch - i.e., a tensor of shape batch x 1
+        S = attn_length
+        pt = math_ops.reduce_sum((vp * tanh), [2, 3])
+        pt = math_ops.sigmoid(pt) * S
 
-            # here we switch the 0s to 1s and the 1s to 0s
-            # we correct the values so True == 1 and False == 0
-            mask = tf.to_float(tf.equal(m, 0.0))
+        # now we get only the integer part of the values
+        pt = tf.floor(pt)
 
-            # here we switch off all the values that fall outside the window
-            # first we switch off those in the truncated normal
-            masked_soft = soft * mask
-            # second we switch off the weights
+        # we now create a tensor containing the indices representing each position
+        # of the sentence - i.e., if the sentence contain 5 tokens and batch_size is 3,
+        # the resulting tensor will be:
+        # [[0, 1, 2, 3, 4]
+        #  [0, 1, 2, 3, 4]
+        #  [0, 1, 2, 3, 4]]
+        #
+        indices = []
+        for pos in xrange(attn_length):
+            indices.append(pos)
+        indices = indices * batch_size
+        idx = tf.convert_to_tensor(indices, dtype=dtype)
+        idx = tf.reshape(idx, [batch_size, attn_length])
 
-            #  # this vector is needed for the power operation
-            # twos = tf.ones_like(idx, dtype=dtype) * 2
+        # here we calculate the boundaries of the attention window based on the ppositions
+        low = pt - window_size + 1  # we add one because the floor op already generates the first position
+        high = pt + window_size
 
-            # here we calculate the 'truncated normal distribution'
-            numerator = -tf.pow((idx - pt), tf.convert_to_tensor(2, dtype=dtype))
-            div = tf.truediv(numerator, denominator)
-            e = math_ops.exp(div)  # result of the truncated normal distribution
+        # here we check our positions against the boundaries
+        mlow = tf.to_float(idx < low)
+        mhigh = tf.to_float(idx > high)
 
-            at = masked_soft * e
+        # now we combine both into a pre-mask that has 0s and 1s switched
+        # i.e, at this point, True == 0 and False == 1
+        m = mlow + mhigh  # batch_size
 
-            # Now calculate the attention-weighted vector d.
-            d = math_ops.reduce_sum(
-                    array_ops.reshape(at, [-1, attn_length, 1, 1]) * hidden_attn,
-                    [1, 2])
-            ds.append(array_ops.reshape(d, [-1, attn_size]))
+        # here we switch the 0s to 1s and the 1s to 0s
+        # we correct the values so True == 1 and False == 0
+        mask = tf.to_float(tf.equal(m, 0.0))
+
+        # here we switch off all the values that fall outside the window
+        # first we switch off those in the truncated normal
+        masked_soft = soft * mask
+
+        # here we calculate the 'truncated normal distribution'
+        numerator = -tf.pow((idx - pt), tf.convert_to_tensor(2, dtype=dtype))
+        div = tf.truediv(numerator, denominator)
+        e = math_ops.exp(div)  # result of the truncated normal distribution
+
+        at = masked_soft * e
+
+        # Now calculate the attention-weighted vector d.
+        d = math_ops.reduce_sum(
+                array_ops.reshape(at, [-1, attn_length, 1, 1]) * hidden_attn,
+                [1, 2])
+        ds = array_ops.reshape(d, [-1, attn_size])
 
     return ds
-
-
-def bidirectional_model_with_buckets(encoder_inputs, encoder_inputs_r, decoder_inputs, targets,
-                                     weights, buckets, num_decoder_symbols, seq2seq_f,
-                                     softmax_loss_function=None, name=None):
-    """
-    Parameters
-    ----------
-        encoder_inputs: a list of Tensors to feed the encoder; first seq2seq input.
-
-        encoder_inputs_r: a list of Tensors to feed the encoder; second seq2seq input.
-
-        decoder_inputs: a list of Tensors to feed the decoder; third seq2seq input.
-
-        targets: a list of 1D batch-sized int32-Tensors (desired output sequence).
-
-        weights: list of 1D batch-sized float-Tensors to weight the targets.
-
-        buckets: a list of pairs of (input size, output size) for each bucket.
-
-        num_decoder_symbols: integer, number of decoder symbols (output classes).
-
-        seq2seq_f: a sequence-to-sequence model function; it takes 2 input that
-            agree with encoder_inputs and decoder_inputs, and returns a pair
-            consisting of outputs and states (as, e.g., basic_rnn_seq2seq).
-
-        softmax_loss_function: function (inputs-batch, labels-batch) -> loss-batch
-            to be used instead of the standard softmax (the default if this is None).
-
-        name: optional name for this operation, defaults to "model_with_buckets".
-
-    Returns
-    -------
-        outputs: The outputs for each bucket. Its j'th element consists of a list
-            of 2D Tensors of shape [batch_size x num_decoder_symbols] (j'th outputs).
-
-        losses: List of scalar Tensors, representing losses for each bucket.
-
-    Raises
-    ------
-        ValueError: if length of encoder_inputsut, targets, or weights is smaller
-            than the largest (last) bucket.
-    """
-    if len(encoder_inputs) < buckets[-1][0]:
-        raise ValueError("Length of encoder_inputs (%d) must be at least that of la"
-                         "st bucket (%d)." % (len(encoder_inputs), buckets[-1][0]))
-    if len(targets) < buckets[-1][1]:
-        raise ValueError("Length of targets (%d) must be at least that of last"
-                         "bucket (%d)." % (len(targets), buckets[-1][1]))
-    if len(weights) < buckets[-1][1]:
-        raise ValueError("Length of weights (%d) must be at least that of last"
-                         "bucket (%d)." % (len(weights), buckets[-1][1]))
-
-    all_inputs = encoder_inputs + encoder_inputs_r + decoder_inputs + targets + weights
-    losses = []
-    outputs = []
-    with tf.op_scope(all_inputs, name, "model_with_buckets"):
-        for j in xrange(len(buckets)):
-            if j > 0:
-                tf.get_variable_scope().reuse_variables()
-
-            bucket_encoder_inputs = [encoder_inputs[i] for i in xrange(buckets[j][0])]
-
-            bucket_encoder_inputs_r = [encoder_inputs_r[i] for i in xrange(buckets[j][0])]
-
-            bucket_decoder_inputs = [decoder_inputs[i] for i in xrange(buckets[j][1])]
-
-            bucket_outputs, _ = seq2seq_f(bucket_encoder_inputs,
-                                          bucket_encoder_inputs_r,
-                                          bucket_decoder_inputs)
-
-            outputs.append(bucket_outputs)
-
-            bucket_targets = [targets[i] for i in xrange(buckets[j][1])]
-            bucket_weights = [weights[i] for i in xrange(buckets[j][1])]
-            losses.append(seq2seq.sequence_loss(
-                    outputs[-1], bucket_targets, bucket_weights, num_decoder_symbols,
-                    softmax_loss_function=softmax_loss_function))
-
-    return outputs, losses
-
-
-def bidirectional_encoder(source, source_r, src_embedding, encoder_cell, encoder_cell_r,
-                          batch_size, ws, bs, dtype=tf.float32):
-    """
-
-    Parameters
-    ----------
-    source
-    source_r
-    src_embedding
-    encoder_cell
-    encoder_cell_r
-    batch_size
-    ws
-    bs
-    dtype
-
-    Returns
-    -------
-
-    """
-    # source_r = [tf.reverse(s, [False, True]) for s in source]
-
-    # with tf.device("/cpu:0"):
-    with ops.device("/cpu:0"):
-        # get the embeddings
-        emb_inp = [embedding_ops.embedding_lookup(src_embedding, s) for s in source]
-        emb_inpr = [embedding_ops.embedding_lookup(src_embedding, r) for r in source_r]
-
-    initial_state = encoder_cell.zero_state(batch_size=batch_size, dtype=dtype)
-    initial_state_r = encoder_cell_r.zero_state(batch_size=batch_size, dtype=dtype)
-
-    fwd_outputs, fwd_states = rnn.rnn(encoder_cell, emb_inp,
-                                      initial_state=initial_state,
-                                      dtype=dtype,
-                                      scope='fwd_encoder')
-
-    bkw_outputs, bkw_states = rnn.rnn(encoder_cell_r, emb_inpr,
-                                      initial_state=initial_state_r,
-                                      dtype=dtype,
-                                      scope='bkw_encoder')
-
-    # revert the reversed sentence states to concatenate
-    # the second parameter is a list of dimensions to revert - False means does not change
-    # True means revert -We are reverting just the data dimension while time/bach stay equal
-    bkw_outputs = [tf.reverse(b, [False, True]) for b in bkw_outputs]
-
-    # concatenates the forward and backward annotations
-    attention_states = []
-    for f, b in zip(fwd_outputs, bkw_outputs):
-        attention_states.append(tf.concat(0, [f, b]))
-
-    # get the last hidden state of the encoder in the backward process
-    h1 = bkw_states[-1]
-
-    # perform tanh((Ws * h) + b0) step
-    decoder_initial_state = tf.nn.tanh(tf.nn.xw_plus_b(h1, ws, bs))
-
-    return attention_states, decoder_initial_state
 
 
 def reverse_encoder(source,
@@ -507,8 +444,8 @@ def reverse_encoder(source,
                               dtype=dtype,
                               scope='reverse_encoder')
 
-    attention_states = outputs
+    hidden_states = outputs
 
     decoder_initial_state = states[-1]
 
-    return attention_states, decoder_initial_state
+    return hidden_states, decoder_initial_state

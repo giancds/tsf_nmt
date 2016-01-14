@@ -18,8 +18,8 @@ global and local attention with a feedback gate), and the code is not polished. 
 * Global attention module
 * Local attention module (local-p by [Luong et al. (2015)](http://arxiv.org/abs/1508.04025))
 * Content-based functions to compute the attention vector:
-⋅⋅* general by [Luong et al. (2015)](http://arxiv.org/abs/1508.04025)
-⋅⋅* attention by [Vinyals & Kaiser et al. (2014)](http://arxiv.org/abs/1412.7449)
+  * general by [Luong et al. (2015)](http://arxiv.org/abs/1508.04025)
+  * attention by [Vinyals & Kaiser et al. (2014)](http://arxiv.org/abs/1412.7449)
 * Beam search
 
 ###### Dependencies (so far):

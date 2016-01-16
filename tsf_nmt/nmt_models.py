@@ -11,11 +11,50 @@ import copy
 import random
 import numpy
 import tensorflow as tf
-from tensorflow.models.rnn import rnn_cell, seq2seq
-from tensorflow.python.ops import nn_ops
+# from tensorflow.models.rnn import rnn_cell, seq2seq
+from tensorflow.models.rnn import rnn_cell, seq2seq, rnn
+from tensorflow.python.ops import nn_ops, embedding_ops  #, rnn
+from tensorflow.python.framework import ops
 import data_utils
-import nmt
+import attention
 import cells
+
+
+def _reverse_encoder(source,
+                    src_embedding,
+                    encoder_cell,
+                    batch_size,
+                    dtype=tf.float32):
+    """
+
+    Parameters
+    ----------
+    source
+    src_embedding
+    encoder_cell
+    batch_size
+    dtype
+
+    Returns
+    -------
+
+    """
+    # get the embeddings
+    with ops.device("/cpu:0"):
+        emb_inp = [embedding_ops.embedding_lookup(src_embedding, s) for s in source]
+
+    initial_state = encoder_cell.zero_state(batch_size=batch_size, dtype=dtype)
+
+    outputs, states = rnn.rnn(encoder_cell, emb_inp,
+                              initial_state=initial_state,
+                              dtype=dtype,
+                              scope='reverse_encoder')
+
+    hidden_states = outputs
+
+    decoder_initial_state = states[-1]
+
+    return hidden_states, decoder_initial_state
 
 
 def _decode(target,
@@ -37,13 +76,13 @@ def _decode(target,
     # decoder with attention
     with tf.name_scope('decoder_with_attention') as scope:
         # run the decoder with attention
-        outputs, states = nmt.embedding_attention_decoder(
+        outputs, states = attention.embedding_attention_decoder(
                 target, decoder_initial_state, attention_states,
                 decoder_cell, batch_size, target_vocab_size,
                 output_size=None, output_projection=output_projection,
                 feed_previous=do_decode, input_feeding=input_feeding,
                 attention_type=attention_type, dtype=dtype,
-                content_function='vinyals_kayser',
+                content_function=content_function,
                 scope='decoder_with_attention'
         )
 
@@ -78,9 +117,8 @@ def _get_optimizer(name='sgd', lr_rate=0.1, decay=1e-4):
 
 
 def _build_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size, decoder_size,
-                         source_proj_size, target_proj_size, use_lstm=True, dropout=0.0):
-    encoder_cells = []
-    decoder_cells = []
+                         source_proj_size, target_proj_size, use_lstm=True, input_feeding=True,
+                         dropout=0.0):
 
     if use_lstm:
         cell_class = rnn_cell.LSTMCell
@@ -88,14 +126,19 @@ def _build_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size, d
         cell_class = cells.GRU
 
     encoder_cell = cell_class(num_units=encoder_size, input_size=source_proj_size)
-    decoder_cell = cell_class(num_units=decoder_size, input_size=target_proj_size)
+    if input_feeding:
+        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size * 2)
+    else:
+        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size)
+    decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size)
 
     if dropout > 0.0:  # if dropout is 0.0, it is turned off
         encoder_cell = rnn_cell.DropoutWrapper(encoder_cell, output_keep_prob=1.0-dropout)
-        decoder_cell = rnn_cell.DropoutWrapper(decoder_cell, output_keep_prob=1.0-dropout)
+        decoder_cell0 = rnn_cell.DropoutWrapper(decoder_cell0, output_keep_prob=1.0-dropout)
+        decoder_cell1 = rnn_cell.DropoutWrapper(decoder_cell1, output_keep_prob=1.0-dropout)
 
     encoder_rnncell = rnn_cell.MultiRNNCell([encoder_cell] * num_layers_encoder)
-    decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell] * num_layers_decoder)
+    decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell0] + [decoder_cell1] * (num_layers_decoder - 1))
 
     return encoder_rnncell, decoder_rnncell
 
@@ -205,8 +248,9 @@ class Seq2SeqModel(object):
             self.max_len = max_len
             self.dropout = dropout
 
-            if input_feeding:
-                self.decoder_size *= 2
+            # if input_feeding:
+            #     self.decoder_size *= 2
+            #     decoder_size *= 2
 
             self.dtype = dtype
 
@@ -217,7 +261,7 @@ class Seq2SeqModel(object):
             # Sampled softmax only makes sense if we sample less than vocabulary size.
             if 0 < num_samples < self.target_vocab_size:
                 with tf.device("/cpu:0"):
-                    w = tf.get_variable("proj_w", [encoder_size, self.target_vocab_size])
+                    w = tf.get_variable("proj_w", [decoder_size, self.target_vocab_size])
                     w_t = tf.transpose(w)
                     b = tf.get_variable("proj_b", [self.target_vocab_size])
                 self.output_projection = (w, b)
@@ -362,10 +406,11 @@ class Seq2SeqModel(object):
 
         # encoder embedding layer and recurrent layer
         # TODO: change this scope name to the correct one
-        with tf.name_scope('bidirectional_encoder') as scope:
+        # with tf.name_scope('bidirectional_encoder') as scope:
+        with tf.name_scope('reverse_encoder') as scope:
             if translate:
                 scope.reuse_variables()
-            context, decoder_initial_state = nmt.reverse_encoder(
+            context, decoder_initial_state = _reverse_encoder(
                     source, self.src_embedding, self.encoder_cell,
                     self.batch_size, dtype=self.dtype)
 
@@ -393,6 +438,8 @@ class Seq2SeqModel(object):
         encoder_size, decoder_size = self.buckets[bucket_id]
         encoder_inputs, decoder_inputs = [], []
 
+        n_target_words = 0
+
         # Get a random batch of encoder and decoder inputs from data,
         # pad them if needed, reverse encoder inputs and add GO to decoder.
         for _ in xrange(self.batch_size):
@@ -403,6 +450,8 @@ class Seq2SeqModel(object):
             # Encoder inputs are padded and then reversed.
             encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
             encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+
+            n_target_words += len(decoder_input)
 
             # Decoder inputs get an extra "GO" symbol, and are padded then.
             decoder_pad_size = decoder_size - len(decoder_input) - 1
@@ -434,7 +483,8 @@ class Seq2SeqModel(object):
                 if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
                     batch_weight[batch_idx] = 0.0
             batch_weights.append(batch_weight)
-        return batch_encoder_inputs, batch_decoder_inputs, batch_weights
+
+        return batch_encoder_inputs, batch_decoder_inputs, batch_weights, n_target_words
 
     def train_step(self, session, encoder_inputs, decoder_inputs, target_weights,
                    bucket_id, forward_only, softmax=False):

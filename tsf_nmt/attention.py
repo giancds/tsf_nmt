@@ -4,22 +4,24 @@ from __future__ import division
 from __future__ import print_function
 import tensorflow as tf
 
-from tensorflow.models.rnn import seq2seq
-
-from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
-from tensorflow.python.ops import array_ops, embedding_ops, math_ops, nn_ops, rnn, rnn_cell
+from tensorflow.python.ops import array_ops, embedding_ops, math_ops, nn_ops  #, rnn_cell
+from tensorflow.models.rnn import rnn_cell
 from tensorflow.python.ops import variable_scope as vs
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 
+VINYALS_KAISER = 'vinyals_kayser'
+LUONG_GENERAL = 'luong_general'
+LUONG_DOT = 'luong_dot'
+
 
 def embedding_attention_decoder(decoder_inputs, initial_state, attention_states, cell,
                                 batch_size, num_symbols, window_size=10,
                                 output_size=None, output_projection=None, input_feeding=False,
-                                feed_previous=False, attention_type=None, content_function='vinyals_kayser',
-                                dtype=dtypes.float32, scope=None):
+                                feed_previous=False, attention_type=None, content_function=VINYALS_KAISER,
+                                dtype=tf.float32, scope=None):
     """RNN decoder with embedding and attention and a pure-decoding option.
 
     Args:
@@ -70,7 +72,10 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
 
     with vs.variable_scope(scope or "embedding_attention_decoder"):
         with ops.device("/cpu:0"):
-            embedding = vs.get_variable("embedding", [num_symbols, cell.input_size])
+            if input_feeding:
+                embedding = vs.get_variable("embedding", [num_symbols, cell.input_size / 2])
+            else:
+                embedding = vs.get_variable("embedding", [num_symbols, cell.input_size])
 
         def extract_argmax_and_embed(prev, _):
             """Loop_function that extracts the symbol from prev and embeds it."""
@@ -93,12 +98,12 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
         return _attention_decoder(
                     emb_inp, initial_state, attention_states, cell, batch_size, attention_type=attention_type,
                     output_size=output_size, loop_function=loop_function, window_size=window_size,
-                    input_feeding=input_feeding)
+                    input_feeding=input_feeding, content_function=content_function)
 
 
 def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, batch_size, attention_type=False,
                        output_size=None, loop_function=None, window_size=10, input_feeding=False,
-                       content_function='vinyals_kayser', dtype=dtypes.float32, scope=None):
+                       content_function=VINYALS_KAISER, dtype=tf.float32, scope=None):
     """RNN decoder with local attention for the sequence-to-sequence model.
 
     Args:
@@ -155,12 +160,19 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
 
         attention_vec_size = attn_size  # Size of query vectors for attention.
 
-        # for a in xrange(num_heads):
-        # here we calculate the W_a * s_i-1 (W1 * h_1) part of the attention alignment
-        k = vs.get_variable("AttnW_%d" % 0, [1, 1, attn_size, attention_vec_size])
-        conv = nn_ops.conv2d(hidden, k, [1, 1, 1, 1], "SAME")
-        hidden_features = conv
-        va = vs.get_variable("AttnV_%d" % 0, [attention_vec_size])
+        va = None
+        hidden_features = None
+
+        if content_function is not LUONG_DOT:
+
+            # for a in xrange(num_heads):
+            # here we calculate the W_a * s_i-1 (W1 * h_1) part of the attention alignment
+            k = vs.get_variable("AttnW_%d" % 0, [1, 1, attn_size, attention_vec_size])
+            hidden_features = nn_ops.conv2d(hidden, k, [1, 1, 1, 1], "SAME")
+            va = vs.get_variable("AttnV_%d" % 0, [attention_vec_size])
+
+        else:
+            hidden_features = hidden
 
         states = [initial_state]
 
@@ -169,8 +181,8 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
         batch_attn_size = array_ops.pack([batch, attn_size])
 
         # initial attention state
-        attns = array_ops.zeros(batch_attn_size, dtype=dtype)
-        attns.set_shape([None, attn_size])
+        ctx = array_ops.zeros(batch_attn_size, dtype=dtype)
+        ctx.set_shape([None, attn_size])
 
         for i in xrange(len(decoder_inputs)):
             if i > 0:
@@ -178,7 +190,7 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
 
             if input_feeding:
                 # if using input_feeding, concatenate previous attention with input to layers
-                inp = array_ops.concat(1, [decoder_inputs[i], attns])
+                inp = array_ops.concat(1, [decoder_inputs[i], ctx])
             else:
                 inp = decoder_inputs[i]
 
@@ -188,7 +200,7 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
                     inp = array_ops.stop_gradient(loop_function(prev, 12))
 
             # Merge input and previous attentions into one vector of the right size.
-            x = rnn_cell.linear([inp] + [attns], cell.input_size, True)
+            x = rnn_cell.linear([inp] + [ctx], cell.input_size, True)
 
             # Run the RNN.
             cell_output, new_state = cell(x, states[-1])
@@ -196,27 +208,47 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
 
             dt = new_state
 
+            last_layer_output = None
+            if content_function is LUONG_GENERAL or content_function is LUONG_DOT:
+                last_layer_output = cell_output
+                # _, _, _, h4 = tf.split(1, 4, dt)
+                # _, state = tf.split(1, 2, h4)
+                # last_layer_output = state
+                # last_layer_output = dt
+
             # Run the attention mechanism.
             if attention_type is 'local':
-                attns = _local_attention(decoder_hidden_state=dt, hidden_features=hidden_features,
-                                         va=va, hidden_attn=hidden, attention_vec_size=attention_vec_size,
-                                         attn_length=attn_length, attn_size=attn_size, batch_size=batch_size,
-                                         window_size=window_size, dtype=dtype)
+                ctx = _local_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
+                                       hidden_features=hidden_features, va=va, hidden_attn=hidden,
+                                       attention_vec_size=attention_vec_size, attn_length=attn_length,
+                                       attn_size=attn_size, batch_size=batch_size, content_function=content_function,
+                                       window_size=window_size, dtype=dtype)
 
             elif attention_type is 'global':
-                attns = _global_attention(decoder_hidden_state=dt,
-                                          hidden_features=hidden_features, v=va, hidden_attn=hidden,
-                                          attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                          attn_size=attn_size)
+                ctx = _global_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
+                                        hidden_features=hidden_features, v=va, hidden_attn=hidden,
+                                        attention_vec_size=attention_vec_size, attn_length=attn_length,
+                                        content_function=content_function, attn_size=attn_size)
 
             else:  # here we choose the hybrid mechanism
-                attns = _hybrid_attention(decoder_hidden_state=dt, hidden_features=hidden_features,
-                                          va=va, hidden_attn=hidden, attention_vec_size=attention_vec_size,
-                                          attn_length=attn_length, attn_size=attn_size, batch_size=batch_size,
-                                          window_size=window_size, dtype=dtype)
+                ctx = _hybrid_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
+                                        hidden_features=hidden_features, va=va, hidden_attn=hidden,
+                                        attention_vec_size=attention_vec_size, attn_length=attn_length,
+                                        attn_size=attn_size, batch_size=batch_size,
+                                        content_function=content_function, window_size=window_size, dtype=dtype)
+
+            if content_function is LUONG_GENERAL or content_function is LUONG_DOT:
+
+                with vs.variable_scope("AttnOutputProjectionLuong"):
+
+                    ctx = tf.concat(1, [ctx, last_layer_output])
+
+                    ctx = rnn_cell.linear([ctx], output_size, True)
+
+                    ctx = tf.tanh(ctx)
 
             with vs.variable_scope("AttnOutputProjection"):
-                output = rnn_cell.linear([cell_output] + [attns], output_size, True)
+                output = rnn_cell.linear([cell_output] + [ctx], output_size, True)
 
             if loop_function is not None:
                 # We do not propagate gradients over the loop function.
@@ -228,22 +260,23 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
 
 
 def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, attention_vec_size,
-                      attn_length, attn_size, batch_size, window_size=10, content_function='vinyals_kayser',
-                      dtype=dtypes.float32):
+                      attn_length, attn_size, batch_size, window_size=10, content_function=VINYALS_KAISER,
+                      last_layer_output=None, dtype=tf.float32):
 
     local_attn = _local_attention(decoder_hidden_state=decoder_hidden_state,
                                   hidden_features=hidden_features, va=va, hidden_attn=hidden_attn,
                                   attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                  attn_size=attn_size, batch_size=batch_size,
-                                  window_size=window_size, dtype=dtype)
+                                  attn_size=attn_size, batch_size=batch_size, content_function=content_function,
+                                  window_size=window_size, last_layer_output=last_layer_output, dtype=dtype)
 
     global_attn = _global_attention(decoder_hidden_state=decoder_hidden_state,
                                     hidden_features=hidden_features, v=va, hidden_attn=hidden_attn,
                                     attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                    attn_size=attn_size)
+                                    content_function=content_function, attn_size=attn_size,
+                                    last_layer_output=last_layer_output, )
 
     with vs.variable_scope("FeedbackGate_%d" % 0):
-        y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
+        y = rnn_cell.linear(decoder_hidden_state, attention_vec_size)
         y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
 
         vb = vs.get_variable("FeedbackVb_%d" % 0, [attention_vec_size])
@@ -258,24 +291,34 @@ def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, at
 
 
 def _global_attention(decoder_hidden_state, hidden_features, v, hidden_attn, attention_vec_size, attn_length,
-                      attn_size, content_function='vinyals_kayser'):
+                      attn_size, content_function=VINYALS_KAISER, last_layer_output=None):
     """Put attention masks on hidden using hidden_features and query."""
 
     with vs.variable_scope("Attention_%d" % 0):
 
-        if content_function is 'vinyals_kayser':
+        # a = None
+
+        if content_function is LUONG_DOT:
+
+            assert last_layer_output is not None
+
+            s = math_ops.reduce_sum((hidden_features * last_layer_output), [2, 3])  # hidden features are h_s
+
+            # a = tf.matmul(last_layer_output, hidden_features)
+
+        elif content_function is LUONG_GENERAL:
+
+            assert last_layer_output is not None
+
+            s = math_ops.reduce_sum((last_layer_output * hidden_features), [2, 3])  # hidden features are Wa*h_s
+
+        else:
+
             y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
             y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
 
             # Attention mask is a softmax of v^T * tanh(...).
             s = math_ops.reduce_sum(v * math_ops.tanh(hidden_features + y), [2, 3])
-
-        elif content_function is 'luong_general':
-
-            _, _, _, h4 = tf.split(1, 4, decoder_hidden_state)
-            _, state = tf.split(1, 2, h4)
-
-            s = math_ops.reduce_sum((hidden_features * hidden_features), [2, 3])
 
         a = nn_ops.softmax(s)
 
@@ -288,26 +331,9 @@ def _global_attention(decoder_hidden_state, hidden_features, v, hidden_attn, att
     return ds
 
 
-def _vinyals_kayser(decoder_hidden_state, hidden_features, v, attention_vec_size):
-    y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
-    y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
-
-    # Attention mask is a softmax of v^T * tanh(...).
-    s = math_ops.reduce_sum(v * math_ops.tanh(hidden_features + y), [2, 3])
-
-    return s
-
-
-def _luong_general(decoder_hidden_state, hidden_features, v, attention_vec_size):
-    _, _, _, h4 = tf.split(1, 4, decoder_hidden_state)
-    _, state = tf.split(1, 2, h4)
-    s = math_ops.reduce_sum((hidden_features * hidden_features), [2, 3])
-    return s
-
-
 def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, attention_vec_size,
-                     attn_length, attn_size, batch_size, window_size=10, content_function='vinyals_kayser',
-                    dtype=dtypes.float32):
+                     attn_length, attn_size, batch_size, window_size=10, content_function=VINYALS_KAISER,
+                     last_layer_output=None, dtype=tf.float32):
     """Put attention masks on hidden using hidden_features and query.
     Parameters
     ----------
@@ -323,7 +349,24 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
 
     with vs.variable_scope("AttentionLocal_%d" % 0):
 
-        if content_function is 'vinyals_kayser':
+        a = None
+        ht = None
+
+        if content_function is LUONG_DOT:
+
+            assert last_layer_output is not None
+
+            a = math_ops.reduce_sum((last_layer_output * hidden_features), [2, 3])
+
+        elif content_function is LUONG_GENERAL:
+
+            assert last_layer_output is not None
+
+            ht = rnn_cell.linear([decoder_hidden_state], attention_vec_size, True)
+
+            a = math_ops.reduce_sum((last_layer_output * hidden_features), [2, 3])
+
+        else:
 
             # this code calculate the W2*dt part of the equation - we do this here because we need
             # to obtain the current hidden states from the decoder
@@ -339,16 +382,7 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
             # W2*dt = y
             s = math_ops.reduce_sum(va * math_ops.tanh(hidden_features + y), [2, 3])
 
-        elif content_function is 'luong_general':
-
-            ht = rnn_cell.linear([decoder_hidden_state], attention_vec_size, True)
-
-            _, _, _, h4 = tf.split(1, 4, decoder_hidden_state)
-            _, state = tf.split(1, 2, h4)
-
-            s = math_ops.reduce_sum((hidden_features * hidden_features), [2, 3])
-
-        soft = nn_ops.softmax(s)
+            a = nn_ops.softmax(s)
 
         # get the parameters (vp)
         vp = vs.get_variable("AttnVp_%d" % 0, [attention_vec_size])
@@ -396,7 +430,7 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
 
         # here we switch off all the values that fall outside the window
         # first we switch off those in the truncated normal
-        masked_soft = soft * mask
+        masked_soft = a * mask
 
         # here we calculate the 'truncated normal distribution'
         numerator = -tf.pow((idx - pt), tf.convert_to_tensor(2, dtype=dtype))
@@ -412,40 +446,3 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
         ds = array_ops.reshape(d, [-1, attn_size])
 
     return ds
-
-
-def reverse_encoder(source,
-                    src_embedding,
-                    encoder_cell,
-                    batch_size,
-                    dtype=tf.float32):
-    """
-
-    Parameters
-    ----------
-    source
-    src_embedding
-    encoder_cell
-    batch_size
-    dtype
-
-    Returns
-    -------
-
-    """
-    # get the embeddings
-    with ops.device("/cpu:0"):
-        emb_inp = [embedding_ops.embedding_lookup(src_embedding, s) for s in source]
-
-    initial_state = encoder_cell.zero_state(batch_size=batch_size, dtype=dtype)
-
-    outputs, states = rnn.rnn(encoder_cell, emb_inp,
-                              initial_state=initial_state,
-                              dtype=dtype,
-                              scope='reverse_encoder')
-
-    hidden_states = outputs
-
-    decoder_initial_state = states[-1]
-
-    return hidden_states, decoder_initial_state

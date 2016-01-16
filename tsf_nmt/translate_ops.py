@@ -3,7 +3,6 @@ from __future__ import print_function
 import numpy
 import tensorflow as tf
 import sys
-from multiprocessing import Process, Queue
 from tensorflow.python.platform import gfile
 
 import data_utils

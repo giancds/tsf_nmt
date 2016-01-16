@@ -95,6 +95,7 @@ def create_model(session, forward_only, FLAGS=None, buckets=None, translate=Fals
                                     input_feeding=FLAGS.input_feeding,
                                     dropout=dropout_rate,
                                     attention_type=FLAGS.attention_type,
+                                    content_function=FLAGS.content_function,
                                     forward_only=forward_only)
 
 
@@ -108,7 +109,7 @@ def create_model(session, forward_only, FLAGS=None, buckets=None, translate=Fals
     return model
 
 
-def train(FLAGS=None, buckets=None):
+def train(FLAGS=None, buckets=None, save_before_training=False):
     """Train a source->target translation model using some bilingual data."""
 
     assert FLAGS is not None
@@ -126,6 +127,11 @@ def train(FLAGS=None, buckets=None):
         # Create model.
         print('Creating layers.')
         model = create_model(sess, False, FLAGS=FLAGS, buckets=buckets)
+
+        if save_before_training:
+            # Save checkpoint
+            checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+            model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
         # tf.train.write_graph(sess.graph_def, '/home/gian/train2', 'graph.pbtxt')
 
@@ -148,7 +154,15 @@ def train(FLAGS=None, buckets=None):
         current_step = 0
         previous_losses = []
         total_loss = 0.0
+
+        n_target_words = 0
+        avg_word_speed = 0.0
+
         while model.epoch.eval() < FLAGS.max_epochs:
+
+            start_time = time.time()
+
+
             # Choose a bucket according to data distribution. We pick a random number
             # in [0, 1] and use the corresponding interval in train_buckets_scale.
             random_number_01 = numpy.random.random_sample()
@@ -156,11 +170,11 @@ def train(FLAGS=None, buckets=None):
                              if train_buckets_scale[i] > random_number_01])
 
             # Get a batch and make a step.
-            start_time = time.time()
-
-            encoder_inputs, decoder_inputs, target_weights = model.get_train_batch(
+            encoder_inputs, decoder_inputs, target_weights, n_words = model.get_train_batch(
                     train_set, bucket_id
             )
+
+            n_target_words += n_words
             _, step_loss, _ = model.train_step(sess, encoder_inputs, decoder_inputs,
                                                target_weights, bucket_id, False)
 
@@ -179,7 +193,6 @@ def train(FLAGS=None, buckets=None):
                     if model.epoch.eval() >= FLAGS.start_decay:
                         sess.run(model.learning_rate_decay_op)
 
-            step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
             loss += step_loss / FLAGS.steps_per_checkpoint
             current_step = model.global_step.eval()
 
@@ -190,9 +203,15 @@ def train(FLAGS=None, buckets=None):
                 gstep = model.global_step.eval()
                 avgloss = closs / gstep
                 sess.run(model.avg_loss.assign(avgloss))
-                print('epoch %d global step %d learning rate %.4f step-time %.2f avg. loss %.8f' %
+
+                target_words_speed = n_target_words / step_time
+
+                print('epoch %d global step %d learning rate %.4f step-time %.2f avg. loss %.8f - avg. %.2f K target words/sec' %
                       (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
-                       step_time, model.avg_loss.eval()))
+                       step_time, model.avg_loss.eval(), (target_words_speed / 1000.0)))
+
+                n_target_words = 0
+                step_time, loss = 0.0, 0.0
 
             # Once in a while, we save checkpoint, print statistics, and run evals.
             if current_step % FLAGS.steps_per_checkpoint == 0:
@@ -210,10 +229,9 @@ def train(FLAGS=None, buckets=None):
                         sess.run(model.learning_rate_decay_op)
                 previous_losses.append(loss)
 
-                # Save checkpoint and zero timer and loss.
+                # Save checkpoint
                 checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-                step_time, loss = 0.0, 0.0
 
                 prevs = FLAGS.early_stop_patience
                 if len(previous_losses) > (prevs - 1) and loss > max(previous_losses[-prevs:]):
@@ -227,7 +245,7 @@ def train(FLAGS=None, buckets=None):
                 # Run evals on development set and print their perplexity.
                 for bucket_id in xrange(len(buckets)):
 
-                    encoder_inputs, decoder_inputs, target_weights = model.get_train_batch(dev_set, bucket_id)
+                    encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set, bucket_id)
                     _, eval_loss, _ = model.train_step(sess, encoder_inputs, decoder_inputs,
                                                        target_weights, bucket_id, True)
 
@@ -240,3 +258,5 @@ def train(FLAGS=None, buckets=None):
                 print('  eval: averaged loss %.8f' % avg_loss)
 
                 sys.stdout.flush()
+
+            step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint

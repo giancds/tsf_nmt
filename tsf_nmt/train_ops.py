@@ -151,17 +151,12 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
 
         # This is the training loop.
         step_time, loss = 0.0, 0.0
-        current_step = 0
         previous_losses = []
-        total_loss = 0.0
-
         n_target_words = 0
-        avg_word_speed = 0.0
 
         while model.epoch.eval() < FLAGS.max_epochs:
 
             start_time = time.time()
-
 
             # Choose a bucket according to data distribution. We pick a random number
             # in [0, 1] and use the corresponding interval in train_buckets_scale.
@@ -193,10 +188,7 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                     if model.epoch.eval() >= FLAGS.start_decay:
                         sess.run(model.learning_rate_decay_op)
 
-            loss += step_loss / FLAGS.steps_per_checkpoint
             current_step = model.global_step.eval()
-
-            total_loss += step_loss
 
             if current_step % FLAGS.steps_verbosity == 0:
                 closs = model.current_loss.eval()
@@ -206,7 +198,7 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
 
                 target_words_speed = n_target_words / step_time
 
-                print('epoch %d global step %d learning rate %.4f step-time %.2f avg. loss %.8f - avg. %.2f K target words/sec' %
+                print('epoch %d global step %d learning rate %.4f per-step-time %.2f avg. loss %.8f - avg. %.2f K target words/sec' %
                       (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
                        step_time, model.avg_loss.eval(), (target_words_speed / 1000.0)))
 
@@ -259,4 +251,4 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
 
                 sys.stdout.flush()
 
-            step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
+            step_time += (time.time() - start_time) / FLAGS.steps_verbosity

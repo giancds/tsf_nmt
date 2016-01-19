@@ -276,7 +276,7 @@ def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, at
                                     last_layer_output=last_layer_output, )
 
     with vs.variable_scope("FeedbackGate_%d" % 0):
-        y = rnn_cell.linear(decoder_hidden_state, attention_vec_size)
+        y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
         y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
 
         vb = vs.get_variable("FeedbackVb_%d" % 0, [attention_vec_size])

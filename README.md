@@ -4,7 +4,7 @@ paper by [Luong et al. (2015)](http://arxiv.org/abs/1508.04025)
 We are also integrating the techniques described in  "On Using Very Large Target Vocabulary for Neural Machine Translation"
 by [Jean et al. (2015)](http://arxiv.org/abs/1412.2007) using TensorFlow.
 
-I'm heavily relying on Tensorflow's(https://www.tensorflow.org/) seq2seq interfaces to construct the models.
+I'm heavily relying on [Tensorflow's](https://www.tensorflow.org/) seq2seq interfaces to construct the models.
 
 I'm following the PEP8 conventions for coding with one change: I'm using lines 100 characters long. 
 (Sorry python purists). 

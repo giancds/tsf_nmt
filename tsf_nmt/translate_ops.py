@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 
 import numpy
@@ -57,7 +58,7 @@ def decode_from_file(file_path, get_ids=True, FLAGS=None, buckets=None):
                     output_hypotheses, output_scores = model.translation_step(sess,
                                                                               token_ids,
                                                                               beam_size=FLAGS.beam_size,
-                                                                              dump_remaining=False)
+                                                                              dump_remaining=True)
 
                     outputs = output_hypotheses[0]
 

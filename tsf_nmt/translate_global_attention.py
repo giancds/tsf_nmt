@@ -38,14 +38,14 @@ from translate_ops import decode_from_stdin, decode_from_file
 
 # flags related to the model optimization
 tf.app.flags.DEFINE_float('learning_rate', 1.0, 'Learning rate.')
-tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.5, 'Learning rate decays by this much.')
-tf.app.flags.DEFINE_integer('start_decay', 7, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
+tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.50, 'Learning rate decays by this much.')
+tf.app.flags.DEFINE_integer('start_decay', 8, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
 tf.app.flags.DEFINE_string('optimizer', 'sgd',
                            'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
 tf.app.flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 tf.app.flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
-tf.app.flags.DEFINE_integer('beam_size', 5, 'Max size of the beam used for decoding.')
+tf.app.flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
 tf.app.flags.DEFINE_integer('max_len', 100, 'Max size of the beam used for decoding.')
 tf.app.flags.DEFINE_integer('max_epochs', 12,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
 tf.app.flags.DEFINE_integer('max_train_data_size', 0,
@@ -54,37 +54,35 @@ tf.app.flags.DEFINE_integer('max_train_data_size', 0,
 # flags related to model architecture
 tf.app.flags.DEFINE_string('model', 'seq2seq', 'one of these 2 models: seq2seq or bidirectional')
 tf.app.flags.DEFINE_string('attention_type', 'global', 'Which type of attention to use. One of local, global and hybrid.')
-# tf.app.flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
-tf.app.flags.DEFINE_string('content_function', attention.LUONG_DOT, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
+tf.app.flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 tf.app.flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
-tf.app.flags.DEFINE_boolean('input_feeding', True, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
-tf.app.flags.DEFINE_integer('proj_size', 100, 'Size of words projection.')
-tf.app.flags.DEFINE_integer('hidden_size', 100, 'Size of each layer.')
-tf.app.flags.DEFINE_integer('num_layers', 4, 'Number of layers in each component of the model.')
+tf.app.flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
+tf.app.flags.DEFINE_boolean('output_attention', True, 'Whether to pay attention on the decoder outputs. Default to False.')
+tf.app.flags.DEFINE_integer('proj_size', 300, 'Size of words projection.')
+tf.app.flags.DEFINE_integer('hidden_size', 300, 'Size of each layer.')
+tf.app.flags.DEFINE_integer('num_layers', 2, 'Number of layers in each component of the model.')
 
 tf.app.flags.DEFINE_float('dropout', 0.2, 'Dropout rate. When the value is 0.0 dropout is turned off. Optimal should be 0.2 as indicated by Zaremba et al. (2014)')
 
 # flags related to the source and target vocabularies
-tf.app.flags.DEFINE_integer('src_vocab_size', 50000, 'Source language vocabulary size.')
-tf.app.flags.DEFINE_integer('tgt_vocab_size', 50000, 'Target vocabulary size.')
+tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.')
+tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-tf.app.flags.DEFINE_string('model_name', 'model_lstm_global_luong_dot_hid100_proj100_de50000_en50000_sgd1.0.ckpt', 'Data directory')
-# tf.app.flags.DEFINE_string('model_name', 'model_global_vinyals_hid1000_proj1000_en30000_pt30000_sgd1.0.ckpt', 'Model name')
+tf.app.flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_sgd1.0.ckpt', 'Model name')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-# tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_general_vinyals_hid100_proj100_de50000_en50000_sgd1.0/', 'Train directory')
-tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_luong_dot_hid100_proj100_de50000_en50000_sgd1.0/', 'Train directory')
-# tf.app.flags.DEFINE_string('data_dir', '/ichec/work/dtcom001c/data/', 'Data directory')
-# tf.app.flags.DEFINE_string('train_dir', '/ichec/home/users/giancds/train_global', 'Train directory')
-tf.app.flags.DEFINE_string('train_data', 'train.tok.%s', 'Data for training.')
-tf.app.flags.DEFINE_string('valid_data', 'newstest2013.tok.%s', 'Data for validation.')
-tf.app.flags.DEFINE_string('test_data', 'newstest2013.tok.%s', 'Data for testing.')
-# tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
-# tf.app.flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
-# tf.app.flags.DEFINE_string('test_data', 'fapesp-v2.pt-en.test-a.tok.%s', 'Data for testing.')
+tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_sgd1.0/', 'Train directory')
+# tf.app.flags.DEFINE_string('train_data', 'train.tok.%s', 'Data for training.')
+# tf.app.flags.DEFINE_string('valid_data', 'newstest2013.tok.%s', 'Data for validation.')
+# tf.app.flags.DEFINE_string('test_data', 'newstest2013.tok.%s', 'Data for testing.')
+tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
+tf.app.flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
+tf.app.flags.DEFINE_string('test_data', 'fapesp-v2.pt-en.test-a.tok.%s', 'Data for testing.')
 tf.app.flags.DEFINE_string('vocab_data', '', 'Training directory.')
-tf.app.flags.DEFINE_string('source_lang', 'de', 'Source language extension.')
-tf.app.flags.DEFINE_string('target_lang', 'en', 'Target language extension.')
+# tf.app.flags.DEFINE_string('source_lang', 'de', 'Source language extension.')
+# tf.app.flags.DEFINE_string('target_lang', 'en', 'Target language extension.')
+tf.app.flags.DEFINE_string('source_lang', 'en', 'Source language extension.')
+tf.app.flags.DEFINE_string('target_lang', 'pt', 'Target language extension.')
 
 # verbosity and checkpoints
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 100,
@@ -106,6 +104,7 @@ FLAGS = tf.app.flags.FLAGS
 
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
+# _buckets = [(5, 10), (10, 15), (20, 25), (40, 50), (50, 50)]
 _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
 
 
@@ -113,7 +112,7 @@ def main(_):
     if FLAGS.decode_input:
         decode_from_stdin(show_all_n_best=True, FLAGS=FLAGS, buckets=_buckets)
     elif FLAGS.decode_file:
-        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en', FLAGS=FLAGS, buckets=_buckets)
+        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-b.tok.en', FLAGS=FLAGS, buckets=_buckets)
     else:
         train(FLAGS=FLAGS, buckets=_buckets)
 

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import data_utils
 import math
 import nmt_models
@@ -7,7 +8,7 @@ import tensorflow as tf
 import time
 import sys
 from tensorflow.python.platform import gfile
-
+# from six.moves import xrange
 
 def read_data(source_path, target_path, FLAGS=None, buckets=None, max_size=None):
     """Read data from source and target files and put into buckets.
@@ -96,6 +97,7 @@ def create_model(session, forward_only, FLAGS=None, buckets=None, translate=Fals
                                     dropout=dropout_rate,
                                     attention_type=FLAGS.attention_type,
                                     content_function=FLAGS.content_function,
+                                    output_attention=FLAGS.output_attention,
                                     forward_only=forward_only)
 
 
@@ -150,7 +152,8 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                                for i in xrange(len(train_bucket_sizes))]
 
         # This is the training loop.
-        step_time, loss = 0.0, 0.0
+        step_time = 0.0
+        words_time = 0.0
         previous_losses = []
         n_target_words = 0
 
@@ -183,7 +186,19 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
             # update epoch number
             if model.samples_seen.eval() >= train_total_size:
                 sess.run(model.epoch_update_op)
+                ep = model.epoch.eval()
+                print("Epoch %d finished..." % (ep - 1))
+
+                # Save checkpoint
+                checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+                model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+                if ep >= FLAGS.max_epochs:
+                    break
+
+                print("Epoch %d started..." % ep)
                 sess.run(model.samples_seen_reset_op)
+
                 if FLAGS.start_decay > 0:
                     if model.epoch.eval() >= FLAGS.start_decay:
                         sess.run(model.learning_rate_decay_op)
@@ -196,43 +211,41 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                 avgloss = closs / gstep
                 sess.run(model.avg_loss.assign(avgloss))
 
-                target_words_speed = n_target_words / step_time
+                target_words_speed = n_target_words / words_time
 
-                print('epoch %d global step %d learning rate %.4f per-step-time %.2f avg. loss %.8f - avg. %.2f K target words/sec' %
+                loss = model.avg_loss.eval()
+                ppx = math.exp(loss) if loss < 300 else float('inf')
+
+                print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx %.8f - avg. %.2f K target words/sec' %
                       (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
-                       step_time, model.avg_loss.eval(), (target_words_speed / 1000.0)))
+                       step_time, loss, ppx, (target_words_speed / 1000.0)))
 
                 n_target_words = 0
-                step_time, loss = 0.0, 0.0
+                step_time = 0.0
+                words_time = 0.0
 
             # Once in a while, we save checkpoint, print statistics, and run evals.
             if current_step % FLAGS.steps_per_checkpoint == 0:
-
-                # Print statistics for the previous epoch.
-                # perplexity = math.exp(loss) if loss < 300 else float('inf')
-                # print('global step %d learning rate %.4f step-time %.2f perplexity '
-                #       '%.2f' % (model.global_step.eval(), model.learning_rate.eval(),
-                #                 step_time, perplexity))
-
                 # Decrease learning rate if no improvement was seen over last n times.
                 if FLAGS.start_decay == 0:
                     prevs = FLAGS.lr_rate_patience
-                    if len(previous_losses) > (prevs - 1) and loss > max(previous_losses[-prevs:]):
+                    if len(previous_losses) > (prevs - 1) and step_loss > max(previous_losses[-prevs:]):
                         sess.run(model.learning_rate_decay_op)
-                previous_losses.append(loss)
+                previous_losses.append(step_loss)
 
                 # Save checkpoint
                 checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
                 prevs = FLAGS.early_stop_patience
-                if len(previous_losses) > (prevs - 1) and loss > max(previous_losses[-prevs:]):
+                if len(previous_losses) > (prevs - 1) and step_loss > max(previous_losses[-prevs:]):
                     print('EARLY STOP!')
                     break
 
             if current_step % FLAGS.steps_per_validation == 0:
 
                 total_eval_loss = 0.0
+                total_ppx = 0.0
 
                 # Run evals on development set and print their perplexity.
                 for bucket_id in xrange(len(buckets)):
@@ -244,11 +257,20 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                     total_eval_loss += eval_loss
 
                     eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
+                    total_ppx += eval_ppx
                     print('  eval: bucket %d perplexity %.2f' % (bucket_id, eval_ppx))
 
                 avg_loss = total_eval_loss / len(buckets)
+                print('\n  eval: averaged perplexity %.8f' % (total_ppx / float(len(buckets))))
                 print('  eval: averaged loss %.8f' % avg_loss)
 
                 sys.stdout.flush()
 
             step_time += (time.time() - start_time) / FLAGS.steps_verbosity
+            words_time += (time.time() - start_time)
+
+        # # Save checkpoint
+        # checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+        # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+        print("\nTraining finished!!\n")

@@ -19,6 +19,10 @@ import data_utils
 import attention
 import cells
 
+import sys
+
+# from six.moves import xrange
+
 
 def _reverse_encoder(source,
                     src_embedding,
@@ -68,6 +72,7 @@ def _decode(target,
             input_feeding=False,
             attention_type=None,
             content_function='vinyals_kayser',
+            output_attention=False,
             dtype=tf.float32):
     assert attention_type is not None
 
@@ -83,6 +88,7 @@ def _decode(target,
                 feed_previous=do_decode, input_feeding=input_feeding,
                 attention_type=attention_type, dtype=dtype,
                 content_function=content_function,
+                output_attention=output_attention,
                 scope='decoder_with_attention'
         )
 
@@ -181,6 +187,7 @@ class Seq2SeqModel(object):
                  forward_only=False,
                  max_len=100,
                  cpu_only=False,
+                 output_attention=False,
                  dtype=tf.float32):
         """Create the model.
         Args:
@@ -245,12 +252,9 @@ class Seq2SeqModel(object):
             self.decoder_size = decoder_size
 
             self.input_feeding = input_feeding
+            self.output_attention = output_attention
             self.max_len = max_len
             self.dropout = dropout
-
-            # if input_feeding:
-            #     self.decoder_size *= 2
-            #     decoder_size *= 2
 
             self.dtype = dtype
 
@@ -339,7 +343,8 @@ class Seq2SeqModel(object):
                                                    self.attn_plcholder, self.target_vocab_size, self.output_projection,
                                                    batch_size=self.batch_size, attention_type=self.attention_type,
                                                    content_function=self.content_function, do_decode=True,
-                                                   input_feeding=self.input_feeding, dtype=self.dtype)
+                                                   input_feeding=self.input_feeding, dtype=self.dtype,
+                                                   output_attention=self.output_attention)
 
                 # If we use output projection, we need to project outputs for decoding.
                 if self.output_projection is not None:
@@ -397,7 +402,8 @@ class Seq2SeqModel(object):
                                   self.target_vocab_size, self.output_projection,
                                   batch_size=self.batch_size, attention_type=self.attention_type,
                                   do_decode=do_decode, input_feeding=self.input_feeding,
-                                  content_function=self.content_function, dtype=self.dtype)
+                                  content_function=self.content_function, dtype=self.dtype,
+                                  output_attention=self.output_attention)
 
         # return the output (logits) and internal states
         return outputs, states

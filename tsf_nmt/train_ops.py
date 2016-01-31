@@ -145,6 +145,8 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
         train_bucket_sizes = [len(train_set[b]) for b in xrange(len(buckets))]
         train_total_size = float(sum(train_bucket_sizes))
 
+        print("Total number of updates per epoch: %d" % (train_total_size / FLAGS.batch_size))
+
         # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
         # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
         # the size if i-th training bucket, as used later.
@@ -237,11 +239,6 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                 checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
-                prevs = FLAGS.early_stop_patience
-                if len(previous_losses) > (prevs - 1) and step_loss > max(previous_losses[-prevs:]):
-                    print('EARLY STOP!')
-                    break
-
             if current_step % FLAGS.steps_per_validation == 0:
 
                 total_eval_loss = 0.0
@@ -265,6 +262,14 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                 print('  eval: averaged loss %.8f' % avg_loss)
 
                 sys.stdout.flush()
+
+                prevs = FLAGS.early_stop_patience
+
+                # check early stop - if early stop patience is greater than 0, test it
+                if prevs > 0:
+                    if len(previous_losses) > (prevs - 1) and step_loss > max(previous_losses[-prevs:]):
+                        print('EARLY STOP!')
+                        break
 
             step_time += (time.time() - start_time) / FLAGS.steps_verbosity
             words_time += (time.time() - start_time)

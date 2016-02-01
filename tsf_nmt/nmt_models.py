@@ -95,7 +95,7 @@ def _decode(target,
     return outputs, states
 
 
-def _get_optimizer(name='sgd', lr_rate=0.1, decay=1e-4):
+def _get_optimizer(name='sgd', lr_rate=0.1, decay=0.9):
     """
 
     Parameters
@@ -139,9 +139,9 @@ def _build_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size, d
     decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size)
 
     if dropout > 0.0:  # if dropout is 0.0, it is turned off
-        encoder_cell = rnn_cell.DropoutWrapper(encoder_cell, output_keep_prob=1.0-dropout)
-        decoder_cell0 = rnn_cell.DropoutWrapper(decoder_cell0, output_keep_prob=1.0-dropout)
-        decoder_cell1 = rnn_cell.DropoutWrapper(decoder_cell1, output_keep_prob=1.0-dropout)
+        encoder_cell = cells.DropoutWrapper(encoder_cell, output_keep_prob=1.0-dropout)
+        decoder_cell0 = cells.DropoutWrapper(decoder_cell0, output_keep_prob=1.0-dropout)
+        decoder_cell1 = cells.DropoutWrapper(decoder_cell1, output_keep_prob=1.0-dropout)
 
     encoder_rnncell = rnn_cell.MultiRNNCell([encoder_cell] * num_layers_encoder)
     decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell0] + [decoder_cell1] * (num_layers_decoder - 1))
@@ -188,6 +188,7 @@ class Seq2SeqModel(object):
                  max_len=100,
                  cpu_only=False,
                  output_attention=False,
+                 early_stop_patience=0,
                  dtype=tf.float32):
         """Create the model.
         Args:
@@ -245,6 +246,17 @@ class Seq2SeqModel(object):
             self.current_loss_update_op = None
             self.avg_loss = tf.Variable(0.0, trainable=False)
             self.avg_loss_update_op = self.avg_loss.assign(tf.div(self.current_loss, self.global_step))
+
+            if early_stop_patience > 0:
+                self.best_eval_loss = tf.Variable(numpy.inf, trainable=False)
+                self.estop_counter = tf.Variable(0, trainable=False)
+                self.estop_counter_update_op = self.estop_counter.assign(self.estop_counter + 1)
+                self.estop_counter_reset_op = self.estop_counter.assign(0)
+            else:
+                self.best_eval_loss = None
+                self.estop_counter = None
+                self.estop_counter_update_op = None
+                self.estop_counter_reset_op = None
 
             self.source_proj_size = source_proj_size
             self.target_proj_size = target_proj_size

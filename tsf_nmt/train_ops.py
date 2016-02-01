@@ -98,7 +98,8 @@ def create_model(session, forward_only, FLAGS=None, buckets=None, translate=Fals
                                     attention_type=FLAGS.attention_type,
                                     content_function=FLAGS.content_function,
                                     output_attention=FLAGS.output_attention,
-                                    forward_only=forward_only)
+                                    forward_only=forward_only,
+                                    early_stop_patience=FLAGS.early_stop_patience)
 
 
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
@@ -175,6 +176,7 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
             )
 
             n_target_words += n_words
+
             # session, encoder_inputs, decoder_inputs, target_weights, bucket_id
             _, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
                                                decoder_inputs=decoder_inputs,
@@ -211,6 +213,7 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
             current_step = model.global_step.eval()
 
             if current_step % FLAGS.steps_verbosity == 0:
+
                 closs = model.current_loss.eval()
                 gstep = model.global_step.eval()
                 avgloss = closs / gstep
@@ -238,21 +241,19 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
 
             # Once in a while, we save checkpoint, print statistics, and run evals.
             if current_step % FLAGS.steps_per_checkpoint == 0:
-                # Decrease learning rate if no improvement was seen over last n times.
-                if FLAGS.start_decay == 0:
-                    prevs = FLAGS.lr_rate_patience
-                    if len(previous_losses) > (prevs - 1) and step_loss > max(previous_losses[-prevs:]):
-                        sess.run(model.learning_rate_decay_op)
-                previous_losses.append(step_loss)
-
                 # Save checkpoint
                 checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
             if current_step % FLAGS.steps_per_validation == 0:
 
+                if FLAGS.dropout > 0.0:
+                    _turn_dropout(model=model, rate=0.0)
+
                 total_eval_loss = 0.0
                 total_ppx = 0.0
+
+                print('\n')
 
                 # Run evals on development set and print their perplexity.
                 for bucket_id in xrange(len(buckets)):
@@ -269,19 +270,34 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                     total_ppx += eval_ppx
                     print('  eval: bucket %d perplexity %.2f' % (bucket_id, eval_ppx))
 
-                avg_loss = total_eval_loss / len(buckets)
-                print('\n  eval: averaged perplexity %.8f' % (total_ppx / float(len(buckets))))
-                print('  eval: averaged loss %.8f' % avg_loss)
+                avg_eval_loss = total_eval_loss / len(buckets)
+                avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
+                print('\n  eval: averaged perplexity %.8f' % avg_ppx)
+                print('  eval: averaged loss %.8f\n' % avg_eval_loss)
 
                 sys.stdout.flush()
 
-                prevs = FLAGS.early_stop_patience
+                estop = FLAGS.early_stop_patience
+
+                if FLAGS.dropout > 0.0:
+                    _turn_dropout(model=model, rate=FLAGS.dropout)
 
                 # check early stop - if early stop patience is greater than 0, test it
-                if prevs > 0:
-                    if len(previous_losses) > (prevs - 1) and step_loss > max(previous_losses[-prevs:]):
-                        print('EARLY STOP!')
-                        break
+                if estop > 0:
+                    if avg_eval_loss < model.best_eval_loss.eval():
+                        sess.run(model.best_eval_loss.assign(avg_eval_loss))
+                        sess.run(model.estop_counter_reset_op)
+                        # Save checkpoint
+                        print('Saving the best model so far...')
+                        best_model_path = os.path.join(FLAGS.train_dir, FLAGS.model_name + '-best')
+                        model.saver.save(sess, best_model_path, global_step=0)
+                    else:
+                        sess.run(model.estop_counter_update_op)
+                        if model.estop_counter.eval() >= FLAGS.early_stop_patience:
+                            print('\nEARLY STOP!\n')
+                            break
+
+
 
             step_time += (time.time() - start_time) / FLAGS.steps_verbosity
             words_time += (time.time() - start_time)
@@ -291,3 +307,14 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
         # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
         print("\nTraining finished!!\n")
+
+
+# TODO: there is a better way of turning dropout off during validation? - this is a little bit "hacky"
+def _turn_dropout(model, rate=0.0):
+
+    for cell in model.encoder_cell._cells:
+        cell.input_keep_prob = rate
+
+    for cell in model.decoder_cell._cells:
+        cell.input_keep_prob = rate
+

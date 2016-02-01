@@ -37,10 +37,10 @@ from translate_ops import decode_from_stdin, decode_from_file
 
 
 # flags related to the model optimization
-tf.app.flags.DEFINE_float('learning_rate', 1.0, 'Learning rate.')
+tf.app.flags.DEFINE_float('learning_rate', 0.001, 'Learning rate.')
 tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.50, 'Learning rate decays by this much.')
 tf.app.flags.DEFINE_integer('start_decay', 8, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
-tf.app.flags.DEFINE_string('optimizer', 'sgd',
+tf.app.flags.DEFINE_string('optimizer', 'adam',
                            'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
 tf.app.flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
@@ -62,17 +62,17 @@ tf.app.flags.DEFINE_integer('proj_size', 300, 'Size of words projection.')
 tf.app.flags.DEFINE_integer('hidden_size', 300, 'Size of each layer.')
 tf.app.flags.DEFINE_integer('num_layers', 2, 'Number of layers in each component of the model.')
 
-tf.app.flags.DEFINE_float('dropout', 0.2, 'Dropout rate. When the value is 0.0 dropout is turned off. Optimal should be 0.2 as indicated by Zaremba et al. (2014)')
+tf.app.flags.DEFINE_float('dropout', 0.0, 'Dropout rate. When the value is 0.0 dropout is turned off. Optimal should be 0.2 as indicated by Zaremba et al. (2014)')
 
 # flags related to the source and target vocabularies
 tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.')
 tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-tf.app.flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_sgd1.0.ckpt',
+tf.app.flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_adam.ckpt',
                            'Model name')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_sgd1.0/', 'Train directory')
+tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_adam/', 'Train directory')
 # tf.app.flags.DEFINE_string('train_data', 'train.tok.%s', 'Data for training.')
 # tf.app.flags.DEFINE_string('valid_data', 'newstest2013.tok.%s', 'Data for validation.')
 # tf.app.flags.DEFINE_string('test_data', 'newstest2013.tok.%s', 'Data for testing.')
@@ -113,7 +113,7 @@ def main(_):
     if FLAGS.decode_input:
         decode_from_stdin(show_all_n_best=True, FLAGS=FLAGS, buckets=_buckets)
     elif FLAGS.decode_file:
-        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-b.tok.en', FLAGS=FLAGS, buckets=_buckets)
+        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en', FLAGS=FLAGS, buckets=_buckets)
     else:
         train(FLAGS=FLAGS, buckets=_buckets)
 

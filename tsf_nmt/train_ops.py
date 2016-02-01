@@ -218,6 +218,13 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                 loss = model.avg_loss.eval()
                 ppx = math.exp(loss) if loss < 300 else float('inf')
 
+                if ppx == float('inf'):
+                    pass
+
+                if numpy.isnan(loss) or numpy.isinf(loss):
+                    print 'NaN detected'
+                    break
+
                 print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx %.8f - avg. %.2f K target words/sec' %
                       (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
                        step_time, loss, ppx, (target_words_speed / 1000.0)))
@@ -248,8 +255,10 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                 for bucket_id in xrange(len(buckets)):
 
                     encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set, bucket_id)
-                    _, eval_loss, _ = model.train_step(sess, encoder_inputs, decoder_inputs,
-                                                       target_weights, bucket_id, True)
+
+                    _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+                                                       decoder_inputs=decoder_inputs, target_weights=target_weights,
+                                                       bucket_id=bucket_id)
 
                     total_eval_loss += eval_loss
 

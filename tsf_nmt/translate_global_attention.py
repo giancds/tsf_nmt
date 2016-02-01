@@ -69,7 +69,8 @@ tf.app.flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary
 tf.app.flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-tf.app.flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_sgd1.0.ckpt', 'Model name')
+tf.app.flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_sgd1.0.ckpt',
+                           'Model name')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
 tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_sgd1.0/', 'Train directory')
 # tf.app.flags.DEFINE_string('train_data', 'train.tok.%s', 'Data for training.')

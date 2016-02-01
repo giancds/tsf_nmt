@@ -568,7 +568,7 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
 
 
 def _attention_decoder_output(decoder_inputs, initial_state, attention_states, cell, batch_size, attention_type=None,
-                              output_size=None, loop_function=None, window_size=10,
+                              output_size=None, loop_function=None, window_size=10, input_length=None,
                               content_function=VINYALS_KAISER, dtype=tf.float32, scope=None):
     """
 

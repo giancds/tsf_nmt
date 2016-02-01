@@ -310,6 +310,8 @@ class Seq2SeqModel(object):
             self.encoder_inputs = []
             self.decoder_inputs = []
             self.target_weights = []
+            # dropout feed
+            dropout_feed = tf.placeholder(tf.float32, name="dropout_feed")
 
             for i in xrange(buckets[-1][0]):  # Last bucket is the biggest one.
                 self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
@@ -330,10 +332,12 @@ class Seq2SeqModel(object):
                 for i in xrange(len(self.encoder_inputs), self.max_len):
                     self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
 
+                # context, decoder_initial_state, attention_states, input_length
                 self.ret0, self.ret1, self.ret2 = self.encode(self.encoder_inputs)
 
+                # shape of this placeholder: the first None indicate the batch size and the second the input length
                 self.attn_plcholder = tf.placeholder(tf.float32,
-                                                     shape=[None, target_proj_size, target_proj_size],
+                                                     shape=[None, self.ret2.get_shape()[1], target_proj_size],
                                                      name="attention_states")
                 self.decoder_init_plcholder = tf.placeholder(tf.float32,
                                                              shape=[None, (target_proj_size) * 2 * num_layers_decoder],
@@ -411,7 +415,6 @@ class Seq2SeqModel(object):
     def encode(self, source, translate=False):
 
         # encoder embedding layer and recurrent layer
-        # TODO: change this scope name to the correct one
         # with tf.name_scope('bidirectional_encoder') as scope:
         with tf.name_scope('reverse_encoder') as scope:
             if translate:
@@ -492,8 +495,7 @@ class Seq2SeqModel(object):
 
         return batch_encoder_inputs, batch_decoder_inputs, batch_weights, n_target_words
 
-    def train_step(self, session, encoder_inputs, decoder_inputs, target_weights,
-                   bucket_id, forward_only, softmax=False):
+    def train_step(self, session, encoder_inputs, decoder_inputs, target_weights, bucket_id):
         """Run a step of the model feeding the given inputs.
         Args:
           session: tensorflow session to use.
@@ -535,24 +537,12 @@ class Seq2SeqModel(object):
         input_feed[last_target] = numpy.zeros([self.batch_size], dtype=numpy.int32)
 
         # Output feed: depends on whether we do a backward step or not.
-        if not forward_only:
-            output_feed = [self.updates[bucket_id],  # Update Op that does SGD.
-                           self.gradient_norms[bucket_id],  # Gradient norm.
-                           self.losses[bucket_id]]  # Loss for this batch.
-        else:
-            output_feed = [self.losses[bucket_id]]  # Loss for this batch.
-            if softmax:
-                for l in xrange(decoder_size):  # Output logits.
-                    output_feed.append(tf.nn.softmax(self.outputs[bucket_id][l]))
-            else:
-                for l in xrange(decoder_size):  # Output logits.
-                    output_feed.append(self.outputs[bucket_id][l])
+        output_feed = [self.updates[bucket_id],  # Update Op that does SGD.
+                       self.gradient_norms[bucket_id],  # Gradient norm.
+                       self.losses[bucket_id]]  # Loss for this batch.
 
         outputs = session.run(output_feed, feed_dict=input_feed)
-        if not forward_only:
-            return outputs[1], outputs[2], None  # Gradient norm, loss, no outputs.
-        else:
-            return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
+        return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
 
     def get_translate_batch(self, data):
         """Get a random batch of data from the specified bucket, prepare for step.
@@ -615,7 +605,7 @@ class Seq2SeqModel(object):
 
         # Get a 1-element batch to feed the sentence to the model
         encoder_inputs, decoder_inputs = self.get_translate_batch([(token_ids, [])])
-        decoder_inputs  =decoder_inputs[-1]
+        decoder_inputs = decoder_inputs[-1]
 
         # here we encode the input sentence
         encoder_input_feed = {}

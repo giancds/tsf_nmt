@@ -542,7 +542,7 @@ class Seq2SeqModel(object):
                        self.losses[bucket_id]]  # Loss for this batch.
 
         outputs = session.run(output_feed, feed_dict=input_feed)
-        return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
+        return outputs[1], outputs[2], None  # Gradient norm, loss, no outputs.
 
     def get_translate_batch(self, data):
         """Get a random batch of data from the specified bucket, prepare for step.

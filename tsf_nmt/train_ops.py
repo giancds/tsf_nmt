@@ -175,8 +175,11 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
             )
 
             n_target_words += n_words
-            _, step_loss, _ = model.train_step(sess, encoder_inputs, decoder_inputs,
-                                               target_weights, bucket_id, False)
+            # session, encoder_inputs, decoder_inputs, target_weights, bucket_id
+            _, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+                                               decoder_inputs=decoder_inputs,
+                                               target_weights=target_weights,
+                                               bucket_id=bucket_id)
 
             currloss = model.current_loss.eval()
             sess.run(model.current_loss.assign(currloss + step_loss))

@@ -1,8 +1,8 @@
 These are my experiments re-implementing the "Effective Approaches to Attention-based Neural Machine Translation" 
 paper by [Luong et al. (2015)](http://arxiv.org/abs/1508.04025)
 
-We are also integrating the techniques described in  "On Using Very Large Target Vocabulary for Neural Machine Translation"
-by [Jean et al. (2015)](http://arxiv.org/abs/1412.2007) using TensorFlow.
+We are also integrating some of the techniques described in  "On Using Very Large Target Vocabulary for Neural Machine 
+Translation" by [Jean et al. (2015)](http://arxiv.org/abs/1412.2007) using TensorFlow.
 
 I'm heavily relying on [Tensorflow's](https://www.tensorflow.org/) seq2seq interfaces to construct the models.
 

@@ -110,10 +110,16 @@ _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
 
 
 def main(_):
+
     if FLAGS.decode_input:
         decode_from_stdin(show_all_n_best=True, FLAGS=FLAGS, buckets=_buckets)
+
     elif FLAGS.decode_file:
-        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en', FLAGS=FLAGS, buckets=_buckets)
+
+        model_path = FLAGS.train_dir + FLAGS.model_name + '-best-0'
+        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en',
+                         model_path=model_path, FLAGS=FLAGS, buckets=_buckets)
+
     else:
         train(FLAGS=FLAGS, buckets=_buckets)
 

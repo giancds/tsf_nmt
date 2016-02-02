@@ -10,15 +10,16 @@ import data_utils
 from train_ops import create_model
 
 
-def decode_from_file(file_path, get_ids=True, FLAGS=None, buckets=None):
+def decode_from_file(file_path, model_path=None, get_ids=True, FLAGS=None, buckets=None):
 
     assert FLAGS is not None
     assert buckets is not None
 
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
 
-        # Create model and load parameters.
-        model = create_model(sess, True, FLAGS, buckets, translate=True)
+        # load model parameters.
+        model = create_model(sess, model_path=model_path, forward_only=True,
+                             FLAGS=FLAGS, buckets=buckets, translate=True)
 
         # Load vocabularies.
         source_vocab_file = FLAGS.data_dir + \

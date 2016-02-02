@@ -53,7 +53,7 @@ def read_data(source_path, target_path, FLAGS=None, buckets=None, max_size=None)
     return data_set
 
 
-def create_model(session, forward_only, FLAGS=None, buckets=None, translate=False):
+def create_model(session, forward_only, model_path=None, FLAGS=None, buckets=None, translate=False):
     """Create translation model and initialize or load parameters in session."""
 
     assert FLAGS is not None
@@ -101,14 +101,20 @@ def create_model(session, forward_only, FLAGS=None, buckets=None, translate=Fals
                                     forward_only=forward_only,
                                     early_stop_patience=FLAGS.early_stop_patience)
 
+    if model_path is None:
+        ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
 
-    ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
-    if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
-        print('Reading model parameters from %s' % ckpt.model_checkpoint_path)
-        model.saver.restore(session, ckpt.model_checkpoint_path)
+        if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
+            print('Reading model parameters from %s' % ckpt.model_checkpoint_path)
+            model.saver.restore(session, ckpt.model_checkpoint_path)
+        else:
+            print('Created model with fresh parameters.')
+            session.run(tf.initialize_all_variables())
+
     else:
-        print('Created model with fresh parameters.')
-        session.run(tf.initialize_all_variables())
+        print('Reading model parameters from %s' % model_path)
+        model.saver.restore(session, model_path)
+
     return model
 
 
@@ -296,8 +302,6 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                         if model.estop_counter.eval() >= FLAGS.early_stop_patience:
                             print('\nEARLY STOP!\n')
                             break
-
-
 
             step_time += (time.time() - start_time) / FLAGS.steps_verbosity
             words_time += (time.time() - start_time)

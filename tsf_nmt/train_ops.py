@@ -279,7 +279,8 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                 avg_eval_loss = total_eval_loss / len(buckets)
                 avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
                 print('\n  eval: averaged perplexity %.8f' % avg_ppx)
-                print('  eval: averaged loss %.8f\n' % avg_eval_loss)
+                print('  eval: averaged loss %.8f' % avg_eval_loss)
+                print('\n  patience %d\n' % int(model.estop_counter.eval()))
 
                 sys.stdout.flush()
 
@@ -299,7 +300,7 @@ def train(FLAGS=None, buckets=None, save_before_training=False):
                         model.saver.save(sess, best_model_path, global_step=0)
                     else:
                         sess.run(model.estop_counter_update_op)
-                        if model.estop_counter.eval() >= FLAGS.early_stop_patience:
+                        if model.estop_counter.eval() >= estop:
                             print('\nEARLY STOP!\n')
                             break
 

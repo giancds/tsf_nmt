@@ -18,10 +18,10 @@ LUONG_DOT = 'luong_dot'
 
 
 def embedding_attention_decoder(decoder_inputs, initial_state, attention_states, cell,
-                                batch_size, num_symbols, window_size=10,
-                                output_size=None, output_projection=None, input_feeding=False,
-                                feed_previous=False, attention_type=None, content_function=VINYALS_KAISER,
-                                output_attention=False, dtype=tf.float32, scope=None):
+                                batch_size, num_symbols, window_size=10, output_size=None,
+                                output_projection=None, input_feeding=False, feed_previous=False,
+                                attention_type=None, content_function=VINYALS_KAISER, output_attention=False,
+                                cell_outputs=None, dtype=tf.float32, scope=None):
     """
     RNN decoder with embedding and attention and a pure-decoding option.
 
@@ -137,7 +137,7 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
             return _attention_decoder_output(
                         emb_inp, initial_state, attention_states, cell, batch_size, attention_type=attention_type,
                         output_size=output_size, loop_function=loop_function, window_size=window_size,
-                        content_function=content_function)
+                        content_function=content_function, cell_outputs=cell_outputs)
 
         else:
 
@@ -323,7 +323,7 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
 
             outputs.append(output)
 
-    return outputs, states
+    return outputs, states, None
 
 
 def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, attention_vec_size,
@@ -568,7 +568,7 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
 
 
 def _attention_decoder_output(decoder_inputs, initial_state, attention_states, cell, batch_size, attention_type=None,
-                              output_size=None, loop_function=None, window_size=10, input_length=None,
+                              output_size=None, loop_function=None, window_size=10, cell_outputs=None,
                               content_function=VINYALS_KAISER, dtype=tf.float32, scope=None):
     """
 
@@ -673,7 +673,8 @@ def _attention_decoder_output(decoder_inputs, initial_state, attention_states, c
             hidden_features = hidden
 
         states = [initial_state]
-        cell_outputs = []
+        if cell_outputs is None:
+            cell_outputs = []
         outputs = []
         prev = None
         batch_attn_size = array_ops.pack([batch, attn_size])
@@ -745,7 +746,7 @@ def _attention_decoder_output(decoder_inputs, initial_state, attention_states, c
 
             outputs.append(output)
 
-    return outputs, states
+    return outputs, states, cell_outputs
 
 
 def _decoder_output_attention(decoder_states, attn_size):

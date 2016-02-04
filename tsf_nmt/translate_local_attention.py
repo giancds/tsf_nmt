@@ -31,7 +31,7 @@ See the following papers for more information on neural translation models.
 from __future__ import print_function
 import tensorflow as tf
 
-from train_ops import train
+from train_ops import train_nmt
 from translate_ops import decode_from_stdin, decode_from_file
 import attention
 
@@ -108,7 +108,7 @@ def main(_):
     elif FLAGS.decode_file:
         decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en', FLAGS=FLAGS, buckets=_buckets)
     else:
-        train(FLAGS=FLAGS, buckets=_buckets)
+        train_nmt(FLAGS=FLAGS, buckets=_buckets)
 
 
 if __name__ == '__main__':

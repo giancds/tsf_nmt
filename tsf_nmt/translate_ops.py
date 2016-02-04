@@ -7,7 +7,7 @@ import sys
 from tensorflow.python.platform import gfile
 
 import data_utils
-from train_ops import create_model
+from build_ops import create_nmt_model
 
 
 def decode_from_file(file_path, model_path=None, get_ids=True, FLAGS=None, buckets=None):
@@ -18,8 +18,8 @@ def decode_from_file(file_path, model_path=None, get_ids=True, FLAGS=None, bucke
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
 
         # load model parameters.
-        model = create_model(sess, model_path=model_path, forward_only=True,
-                             FLAGS=FLAGS, buckets=buckets, translate=True)
+        model = create_nmt_model(sess, model_path=model_path, forward_only=True,
+                                 FLAGS=FLAGS, buckets=buckets, translate=True)
 
         # Load vocabularies.
         source_vocab_file = FLAGS.data_dir + \
@@ -84,7 +84,7 @@ def decode_from_stdin(show_all_n_best=False, FLAGS=None, buckets=None):
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
 
         # Create model and load parameters.
-        model = create_model(sess, True, FLAGS, buckets, translate=True)
+        model = create_nmt_model(sess, True, FLAGS, buckets, translate=True)
 
         # Load vocabularies.
         source_vocab_file = FLAGS.data_dir + \

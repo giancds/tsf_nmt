@@ -32,14 +32,14 @@ from __future__ import print_function
 import tensorflow as tf
 
 import attention
-from train_ops import train
+from train_ops import train_nmt
 from translate_ops import decode_from_stdin, decode_from_file
 
 
 # flags related to the model optimization
 tf.app.flags.DEFINE_float('learning_rate', 0.001, 'Learning rate.')
-tf.app.flags.DEFINE_float('learning_rate_decay_factor', 0.50, 'Learning rate decays by this much.')
-tf.app.flags.DEFINE_integer('start_decay', 8, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
+tf.app.flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by this much. Setting it to 1.0 will not affect the learning rate.')
+tf.app.flags.DEFINE_integer('start_decay', 0, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
 tf.app.flags.DEFINE_string('optimizer', 'adam',
                            'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
@@ -52,7 +52,7 @@ tf.app.flags.DEFINE_integer('max_train_data_size', 0,
                             'Limit on the size of training data (0: no limit).')
 
 # flags related to model architecture
-tf.app.flags.DEFINE_string('model', 'seq2seq', 'one of these 2 models: seq2seq or bidirectional')
+tf.app.flags.DEFINE_string('model', 'seq2seq', 'one of these models: seq2seq')
 tf.app.flags.DEFINE_string('attention_type', 'global', 'Which type of attention to use. One of local, global and hybrid.')
 tf.app.flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 tf.app.flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
@@ -73,6 +73,7 @@ tf.app.flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_hid30
                            'Model name')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
 tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_hid300_proj300_en30000_pt30000_adam/', 'Train directory')
+tf.app.flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 # tf.app.flags.DEFINE_string('train_data', 'train.tok.%s', 'Data for training.')
 # tf.app.flags.DEFINE_string('valid_data', 'newstest2013.tok.%s', 'Data for validation.')
 # tf.app.flags.DEFINE_string('test_data', 'newstest2013.tok.%s', 'Data for testing.')
@@ -95,7 +96,7 @@ tf.app.flags.DEFINE_integer('steps_verbosity', 10,
 
 # pacience flags (learning_rate decay and early stop)
 tf.app.flags.DEFINE_integer('lr_rate_patience', 3, 'How many training steps to monitor.')
-tf.app.flags.DEFINE_integer('early_stop_patience', 10, 'How many training steps to monitor.')
+tf.app.flags.DEFINE_integer('early_stop_patience', 20, 'How many training steps to monitor.')
 
 # decoding/testing flags
 tf.app.flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
@@ -121,7 +122,7 @@ def main(_):
                          model_path=model_path, FLAGS=FLAGS, buckets=_buckets)
 
     else:
-        train(FLAGS=FLAGS, buckets=_buckets)
+        train_nmt(FLAGS=FLAGS, buckets=_buckets)
 
 
 if __name__ == '__main__':

@@ -11,16 +11,13 @@ import copy
 import random
 import numpy
 import tensorflow as tf
-# from tensorflow.models.rnn import rnn_cell, seq2seq
-from tensorflow.models.rnn import rnn_cell, seq2seq, rnn
+
+from tensorflow.models.rnn import seq2seq, rnn
 from tensorflow.python.ops import nn_ops, embedding_ops  #, rnn
 from tensorflow.python.framework import ops
 import data_utils
 import attention
-import cells
-
-import sys
-
+import build_ops
 # from six.moves import xrange
 
 
@@ -73,6 +70,7 @@ def _decode(target,
             attention_type=None,
             content_function='vinyals_kayser',
             output_attention=False,
+            decoder_states=None,
             dtype=tf.float32):
     assert attention_type is not None
 
@@ -80,73 +78,21 @@ def _decode(target,
 
     # decoder with attention
     with tf.name_scope('decoder_with_attention') as scope:
+
         # run the decoder with attention
-        outputs, states = attention.embedding_attention_decoder(
-                target, decoder_initial_state, attention_states,
-                decoder_cell, batch_size, target_vocab_size,
-                output_size=None, output_projection=output_projection,
-                feed_previous=do_decode, input_feeding=input_feeding,
-                attention_type=attention_type, dtype=dtype,
-                content_function=content_function,
-                output_attention=output_attention,
-                scope='decoder_with_attention'
+        outputs, states, decoder_states = attention.embedding_attention_decoder(
+            target, decoder_initial_state, attention_states,
+            decoder_cell, batch_size, target_vocab_size,
+            output_size=None, output_projection=output_projection,
+            feed_previous=do_decode, input_feeding=input_feeding,
+            attention_type=attention_type, dtype=dtype,
+            content_function=content_function,
+            output_attention=output_attention,
+            cell_outputs=decoder_states,
+            scope='decoder_with_attention'
         )
 
-    return outputs, states
-
-
-def _get_optimizer(name='sgd', lr_rate=0.1, decay=0.9):
-    """
-
-    Parameters
-    ----------
-    name
-    lr_rate
-    decay
-
-    Returns
-    -------
-
-    """
-    optimizer = None
-    if name is 'sgd':
-        optimizer = tf.train.GradientDescentOptimizer(lr_rate)
-    elif name is 'adagrad':
-        optimizer = tf.train.AdagradOptimizer(lr_rate)
-    elif name is 'adam':
-        optimizer = tf.train.AdamOptimizer(lr_rate)
-    elif name is 'rmsprop':
-        optimizer = tf.train.RMSPropOptimizer(lr_rate, decay)
-    else:
-        raise ValueError('Optimizer not found.')
-    return optimizer
-
-
-def _build_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size, decoder_size,
-                         source_proj_size, target_proj_size, use_lstm=True, input_feeding=True,
-                         dropout=0.0):
-
-    if use_lstm:
-        cell_class = rnn_cell.LSTMCell
-    else:
-        cell_class = cells.GRU
-
-    encoder_cell = cell_class(num_units=encoder_size, input_size=source_proj_size)
-    if input_feeding:
-        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size * 2)
-    else:
-        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size)
-    decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size)
-
-    if dropout > 0.0:  # if dropout is 0.0, it is turned off
-        encoder_cell = cells.DropoutWrapper(encoder_cell, output_keep_prob=1.0-dropout)
-        decoder_cell0 = cells.DropoutWrapper(decoder_cell0, output_keep_prob=1.0-dropout)
-        decoder_cell1 = cells.DropoutWrapper(decoder_cell1, output_keep_prob=1.0-dropout)
-
-    encoder_rnncell = rnn_cell.MultiRNNCell([encoder_cell] * num_layers_encoder)
-    decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell0] + [decoder_cell1] * (num_layers_decoder - 1))
-
-    return encoder_rnncell, decoder_rnncell
+    return outputs, states, decoder_states
 
 
 class Seq2SeqModel(object):
@@ -310,7 +256,7 @@ class Seq2SeqModel(object):
                     )
 
             # Create the internal multi-layer cell for our RNN.
-            self.encoder_cell, self.decoder_cell = _build_multicell_rnn(
+            self.encoder_cell, self.decoder_cell = build_ops.build_nmt_multicell_rnn(
                     num_layers_encoder, num_layers_decoder, encoder_size, decoder_size,
                     source_proj_size, target_proj_size, use_lstm=use_lstm, dropout=dropout)
 
@@ -351,16 +297,23 @@ class Seq2SeqModel(object):
                 self.attn_plcholder = tf.placeholder(tf.float32,
                                                      shape=[None, self.ret2.get_shape()[1], target_proj_size],
                                                      name="attention_states")
+
                 self.decoder_init_plcholder = tf.placeholder(tf.float32,
                                                              shape=[None, (target_proj_size) * 2 * num_layers_decoder],
                                                              name="decoder_init")
 
-                self.logits, self.states = _decode([self.decoder_inputs[0]], self.decoder_cell, self.decoder_init_plcholder,
-                                                   self.attn_plcholder, self.target_vocab_size, self.output_projection,
-                                                   batch_size=self.batch_size, attention_type=self.attention_type,
-                                                   content_function=self.content_function, do_decode=True,
-                                                   input_feeding=self.input_feeding, dtype=self.dtype,
-                                                   output_attention=self.output_attention)
+                self.decoder_states_holders = []
+                for i in xrange(self.max_len):
+                    self.decoder_states_holders.append(
+                        tf.placeholder(tf.float32, shape=[None, decoder_size], name="decoder_state{0}".format(i))
+                    )
+
+                self.logits, self.states, self.decoder_states = _decode(
+                    [self.decoder_inputs[0]], self.decoder_cell, self.decoder_init_plcholder, self.attn_plcholder,
+                    self.target_vocab_size, self.output_projection, batch_size=self.batch_size,
+                    attention_type=self.attention_type, content_function=self.content_function, do_decode=True,
+                    input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention
+                )
 
                 # If we use output projection, we need to project outputs for decoding.
                 if self.output_projection is not None:
@@ -381,7 +334,7 @@ class Seq2SeqModel(object):
                 self.gradient_norms = []
                 self.updates = []
                 # opt = tf.train.GradientDescentOptimizer(self.learning_rate)
-                opt = _get_optimizer(optimizer, learning_rate)
+                opt = build_ops.get_optimizer(optimizer, learning_rate)
                 for b in xrange(len(buckets)):
                     gradients = tf.gradients(self.losses[b], params)
                     clipped_gradients, norm = tf.clip_by_global_norm(gradients,
@@ -413,13 +366,14 @@ class Seq2SeqModel(object):
         """
         # encode source
         context, decoder_initial_state, attention_states = self.encode(source)
-        # decode target
-        outputs, states = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
-                                  self.target_vocab_size, self.output_projection,
-                                  batch_size=self.batch_size, attention_type=self.attention_type,
-                                  do_decode=do_decode, input_feeding=self.input_feeding,
-                                  content_function=self.content_function, dtype=self.dtype,
-                                  output_attention=self.output_attention)
+
+        # decode target - note that we pass decoder_states as None when training the model
+        outputs, states, decoder_states = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
+                                                  self.target_vocab_size, self.output_projection,
+                                                  batch_size=self.batch_size, attention_type=self.attention_type,
+                                                  do_decode=do_decode, input_feeding=self.input_feeding,
+                                                  content_function=self.content_function, dtype=self.dtype,
+                                                  output_attention=self.output_attention, decoder_states=None)
 
         # return the output (logits) and internal states
         return outputs, states
@@ -443,7 +397,7 @@ class Seq2SeqModel(object):
 
         return context, decoder_initial_state, attention_states
 
-    def get_train_batch(self, data, bucket_id):
+    def get_train_batch(self, data, bucket_id, batch=None):
         """Get a random batch of data from the specified bucket, prepare for step.
         To feed data in step(..) it must be a list of batch-major vectors, while
         data here contains single length-major cases. So the main logic of this
@@ -461,12 +415,14 @@ class Seq2SeqModel(object):
 
         n_target_words = 0
 
+        if batch is None:
+            batch = self.batch_size
+
         # Get a random batch of encoder and decoder inputs from data,
         # pad them if needed, reverse encoder inputs and add GO to decoder.
-        for _ in xrange(self.batch_size):
-            d = data[bucket_id]
+        for _ in xrange(batch):
             # encoder_input, _, decoder_input = random.choice(d)
-            encoder_input, decoder_input = random.choice(d)
+            encoder_input, decoder_input = random.choice(data[bucket_id])
 
             # Encoder inputs are padded and then reversed.
             encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
@@ -634,24 +590,27 @@ class Seq2SeqModel(object):
         attention_states = ret[2]
         shape = ret[1][0].shape
         decoder_init =ret[1][0].reshape(1, shape[0])
+        decoder_states = None
 
         # we must retrieve the last state to feed the decoder run
         decoder_output_feed = [self.logits[-1], self.states[-1]]
 
         for ii in xrange(self.max_len):
 
-            if ii > 0:
-                pass
-
             # we must feed decoder_initial_state and attention_states to run one decode step
             decoder_input_feed = {self.decoder_inputs[0].name : decoder_inputs,
                                   self.decoder_init_plcholder.name: decoder_init,
                                   self.attn_plcholder.name: attention_states}
 
+            if decoder_states is not None:
+                for i in xrange(len(decoder_states)):
+                    decoder_input_feed["decoder_state{0}".format(i)] = decoder_states[i]
+
             ret = session.run(decoder_output_feed, decoder_input_feed)
 
             next_p = ret[0]
             next_state = ret[1]
+            decoder_states = ret[2]
 
             cand_scores = hyp_scores[:, None] - numpy.log(next_p)
             cand_flat = cand_scores.flatten()

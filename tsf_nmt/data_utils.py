@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """Utilities for downloading data from WMT, tokenizing, vocabularies."""
 from __future__ import print_function
-import gzip
+import collections
 import os
 import re
-import tarfile
-import urllib
+import sys
 from tensorflow.python.platform import gfile
 
 # Special vocabulary symbols - we always put them at the start.
@@ -158,7 +157,7 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
                     tokens_file.write(' '.join([str(tok) for tok in token_ids]) + '\n')
 
 
-def prepare_data(FLAGS):
+def prepare_nmt_data(FLAGS):
     """Get WMT data into data_dir, create vocabularies and tokenize data.
 
     Args:
@@ -173,8 +172,6 @@ def prepare_data(FLAGS):
         (4) path to the token-ids for target development data-set,
         (5) path to the token-ids for source test data-set,
         (6) path to the token-ids for target test data-set,
-        (7) path to the source vocabulary file,
-        (8) path to the target vocabulary file.
     """
     # setting relevant info:
     data_dir = FLAGS.data_dir
@@ -203,15 +200,15 @@ def prepare_data(FLAGS):
     data_to_token_ids(train_data % target_lang, tgt_train_ids_path, tgt_vocab_path)
 
     # Create token ids for the development data.
-    tgt_dev_ids_path = (valid_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
-    src_dev_ids_path = (valid_data % str(tgt_vocabulary_size)) + ('.ids.%s' % target_lang)
+    src_dev_ids_path = (valid_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    tgt_dev_ids_path = (valid_data % str(tgt_vocabulary_size)) + ('.ids.%s' % target_lang)
 
     data_to_token_ids(valid_data % source_lang, src_dev_ids_path, src_vocab_path)
     data_to_token_ids(valid_data % target_lang, tgt_dev_ids_path, tgt_vocab_path)
 
     # Create token ids for the test data.
-    tgt_test_ids_path = (test_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
-    src_test_ids_path = (test_data % str(tgt_vocabulary_size)) + ('.ids.%s' % target_lang)
+    src_test_ids_path = (test_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    tgt_test_ids_path = (test_data % str(tgt_vocabulary_size)) + ('.ids.%s' % target_lang)
 
     data_to_token_ids(test_data % source_lang, src_test_ids_path, src_vocab_path)
     data_to_token_ids(test_data % target_lang, tgt_test_ids_path, tgt_vocab_path)
@@ -219,3 +216,116 @@ def prepare_data(FLAGS):
     return (src_train_ids_path, tgt_train_ids_path,
             src_dev_ids_path, tgt_dev_ids_path,
             src_test_ids_path, tgt_test_ids_path)
+
+
+def prepare_lm_data(FLAGS):
+    """Get WMT data into data_dir, create vocabularies and tokenize data.
+
+    Args:
+      src_vocabulary_size: size of the source vocabulary to create and use.
+      tgt_vocabulary_size: size of the target vocabulary to create and use.
+
+    Returns:
+      A tuple of 6 elements:
+        (1) path to the token-ids for source training data-set,
+        (2) path to the token-ids for source development data-set,
+        (3) path to the token-ids for source test data-set,
+    """
+    # setting relevant info:
+    data_dir = FLAGS.data_dir
+    train_data = data_dir + FLAGS.train_data
+    valid_data = data_dir + FLAGS.valid_data
+    test_data = data_dir + FLAGS.test_data
+
+    source_lang = FLAGS.source_lang
+
+    src_vocabulary_size = FLAGS.src_vocab_size
+
+    # Create vocabularies of the appropriate sizes.
+    src_vocab_path = (train_data % str(src_vocabulary_size)) + ('.vocab.%s' % source_lang)
+    create_vocabulary(src_vocab_path, train_data % source_lang, src_vocabulary_size)
+
+    # Create token ids for the training data.
+    src_train_ids_path = (train_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    data_to_token_ids(train_data % source_lang, src_train_ids_path, src_vocab_path)
+
+    # Create token ids for the development data.
+    src_dev_ids_path = (valid_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    data_to_token_ids(valid_data % source_lang, src_dev_ids_path, src_vocab_path)
+
+    # Create token ids for the test data.
+    src_test_ids_path = (test_data % str(src_vocabulary_size)) + ('.ids.%s' % source_lang)
+    data_to_token_ids(test_data % source_lang, src_test_ids_path, src_vocab_path)
+
+    return src_train_ids_path, src_dev_ids_path, src_test_ids_path
+
+
+def read_nmt_data(source_path, target_path, FLAGS=None, buckets=None, max_size=None):
+    """Read data from source and target files and put into buckets.
+
+    Args:lse
+      source_path: path to the files with token-ids for the source language.
+      target_path: path to the file with token-ids for the target language;
+        it must be aligned with the source file: n-th line contains the desired
+        output for n-th line from the source_path.
+      max_size: maximum number of lines to read, all other will be ignored;
+        if 0 or None, data files will be read completely (no limit).
+
+    Returns:
+      data_set: a list of length len(_buckets); data_set[n] contains a list of
+        (source, target) pairs read from the provided data files that fit
+        into the n-th bucket, i.e., such that len(source) < _buckets[n][0] and
+        len(target) < _buckets[n][1]; source and target are lists of token-ids.
+    """
+
+    assert FLAGS is not None
+    assert buckets is not None
+
+    data_set = [[] for _ in buckets]
+    counter = 0
+    with gfile.GFile(source_path, mode='r') as source_file:
+        with gfile.GFile(target_path, mode='r') as target_file:
+            source, target = source_file.readline(), target_file.readline()
+
+            while source and target and (not max_size or counter < max_size):
+                counter += 1
+                if counter % 10000 == 0:
+                    print('  reading data line %d' % counter)
+                    sys.stdout.flush()
+
+                source_ids = [int(x) for x in source.split()]
+                target_ids = [int(x) for x in target.split()]
+                target_ids.append(EOS_ID)
+                for bucket_id, (source_size, target_size) in enumerate(buckets):
+                    if len(source_ids) < source_size and len(target_ids) < target_size:
+                        data_set[bucket_id].append([source_ids, target_ids])
+                        break
+                source, target = source_file.readline(), target_file.readline()
+    return data_set
+
+
+def read_lm_data(source_path, FLAGS=None, max_size=None):
+    """Read data from source and shift by one to be the LM target.
+
+
+    """
+    assert FLAGS is not None
+
+    data_set = []
+    counter = 0
+    with gfile.GFile(source_path, mode='r') as source_file:
+            source = source_file.readline()
+
+            while source and (not max_size or counter < max_size):
+                counter += 1
+
+                if counter % 10000 == 0:
+                    print('  reading data line %d' % counter)
+                    sys.stdout.flush()
+
+                source_ids = [int(x) for x in source.split()]
+                data_set.append(source_ids)
+
+                source = source_file.readline()
+
+    return data_set

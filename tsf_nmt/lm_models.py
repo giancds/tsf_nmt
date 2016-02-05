@@ -1,52 +1,13 @@
-"""Example / benchmark for building a PTB LSTM model.
-
-Trains the model described in:
-(Zaremba, et. al.) Recurrent Neural Network Regularization
-http://arxiv.org/abs/1409.2329
-
-The data required for this example is in the data/ dir of the
-PTB dataset from Tomas Mikolov's webpage:
-
-http://www.fit.vutbr.cz/~imikolov/rnnlm/simple-examples.tgz
-
-There are 3 supported model configurations:
-===========================================
-| config | epochs | train | valid  | test
-===========================================
-| small  | 13     | 37.99 | 121.39 | 115.91
-| medium | 39     | 48.45 |  86.16 |  82.07
-| large  | 55     | 37.87 |  82.62 |  78.29
-The exact results may vary depending on the random initialization.
-
-The hyperparameters used in the model:
-- init_scale - the initial scale of the weights
-- learning_rate - the initial value of the learning rate
-- max_grad_norm - the maximum permissible norm of the gradient
-- num_layers - the number of LSTM layers
-- num_steps - the number of unrolled steps of LSTM
-- hidden_size - the number of LSTM units
-- max_epoch - the number of epochs trained with the initial learning rate
-- max_max_epoch - the total number of epochs for training
-- keep_prob - the probability of keeping weights in the dropout layer
-- lr_decay - the decay of the learning rate for each epoch after "max_epoch"
-- batch_size - the batch size
-
-To compile on CPU:
-  bazel build -c opt tensorflow/models/rnn/ptb:ptb_word_lm
-To compile on GPU:
-  bazel build -c opt tensorflow --config=cuda \
-    tensorflow/models/rnn/ptb:ptb_word_lm
-To run:
-  ./bazel-bin/.../ptb_word_lm \
-    --data_path=/tmp/simple-examples/data/ --alsologtostderr
-
 """
+"""
+
 from __future__ import print_function
 import time
 import random
 import numpy
 import tensorflow as tf
 from tensorflow.models.rnn import seq2seq, rnn
+from tensorflow.python.ops import array_ops
 
 import data_utils
 import build_ops
@@ -64,6 +25,7 @@ class LMModel(object):
                  num_steps=35,
                  proj_size=650,
                  hidden_size=650,
+                 num_samples=512,
                  early_stop_patience=0,
                  dropout_rate=0.0,
                  lr_decay=0.8,
@@ -74,13 +36,22 @@ class LMModel(object):
         self.num_steps = num_steps = num_steps
         size = hidden_size
         vocab_size = vocab_size
+        #
+        # self._input_data = tf.placeholder(tf.int32, [None, num_steps], name='input_data')
+        # self._targets = tf.placeholder(tf.int32, [None, num_steps], name='targets')
 
-        self._input_data = tf.placeholder(tf.int32, [None, num_steps], name='input_data')
-        self._targets = tf.placeholder(tf.int32, [None, num_steps], name='targets')
+        self.input_data = []
+        self.targets = []
+        self.mask = []
 
-        cell = build_ops.build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=use_lstm, dropout=dropout_rate)
+        for i in xrange(num_steps):  # Last bucket is the biggest one.
+            self.input_data.append(tf.placeholder(tf.int32, shape=[None], name="input{0}".format(i)))
+            self.targets.append(tf.placeholder(tf.int32, shape=[None], name="target{0}".format(i)))
+            self.mask.append(tf.placeholder(tf.float32, shape=[None], name="mask{0}".format(i)))
 
-        self._initial_state = cell.zero_state(batch_size, tf.float32)
+        self.cell = build_ops.build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=use_lstm, dropout=dropout_rate)
+
+        # self._initial_state = tf.placeholder(tf.float32, [None], name='initial_state')
 
         # learning rate ops
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
@@ -116,25 +87,39 @@ class LMModel(object):
             self.estop_counter_reset_op = None
 
         with tf.device("/cpu:0"):
+            # input come as one big tensor so we have to split it into a list of tensors to run the rnn cell
             embedding = tf.get_variable("embedding", [vocab_size, proj_size])
-            inputs = tf.split(
-                1, num_steps, tf.nn.embedding_lookup(embedding, self._input_data))
-            inputs = [tf.squeeze(input_, [1]) for input_ in inputs]
+
+            inputs = [tf.nn.embedding_lookup(embedding, i) for i in self.input_data]
+            # inputs = [tf.squeeze(input_, [1]) for input_ in inputs]
 
         with tf.variable_scope("RNN"):
-            outputs, states = rnn.rnn(cell, inputs, initial_state=self._initial_state)
+            # initial_state = self.cell.zero_state(batch_size=batch_size, dtype=tf.float32)
+            # initial state will be all zeros
+            outputs, states = rnn.rnn(self.cell, inputs, dtype=tf.float32)
 
-            output = tf.reshape(tf.concat(1, outputs), [-1, size])
+            with tf.device("/cpu:0"):
+                w = tf.get_variable("softmax_w", [size, vocab_size])
+                w_t = tf.transpose(w)
+                b = tf.get_variable("softmax_b", [vocab_size])
 
-            logits = tf.nn.xw_plus_b(output,
-                                     tf.get_variable("softmax_w", [size, vocab_size]),
-                                     tf.get_variable("softmax_b", [vocab_size]))
+            def sampled_loss(logits, labels):
+                with tf.device("/cpu:0"):
+                    labels = tf.reshape(labels, [-1, 1])
+                    losses = tf.nn.sampled_softmax_loss(w_t, b, logits, labels, num_samples, vocab_size)
+                    return losses
 
-        loss = seq2seq.sequence_loss_by_example([logits],
-                                                [tf.reshape(self._targets, [-1])],
-                                                [tf.ones([batch_size * num_steps])],
-                                                vocab_size)
-        self._cost = cost = tf.reduce_sum(loss) / batch_size
+        softmax_loss_function = sampled_loss
+
+        # TODO: check here
+        loss = seq2seq.sequence_loss_by_example(outputs,
+                                                self.targets,
+                                                self.mask,
+                                                vocab_size,
+                                                softmax_loss_function=softmax_loss_function)
+
+        b_size = array_ops.shape(self.input_data[0])[0]
+        self._cost = cost = tf.reduce_sum(loss) / tf.to_float(b_size)
         self._final_state = states[-1]
 
         if not is_training:
@@ -147,15 +132,6 @@ class LMModel(object):
         self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
 
         self.saver = tf.train.Saver(tf.all_variables())
-
-
-    @property
-    def input_data(self):
-        return self._input_data
-
-    @property
-    def targets(self):
-        return self._targets
 
     @property
     def initial_state(self):
@@ -203,25 +179,48 @@ class LMModel(object):
             batch_targets.append([data_utils.GO_ID] + list(encoder_input + encoder_pad))
 
         # Now we create batch-major vectors from the data selected above.
-        batch_lm_inputs, batch_lm_targets = [], []
+        batch_lm_inputs, batch_lm_targets, batch_weights = [], [], []
 
-        # Batch encoder inputs are just re-indexed encoder_inputs.
-        for batch_idx in xrange(batch):
+        for length_idx in xrange(self.num_steps):
+            batch_lm_inputs.append(
+                    numpy.array([batch_inputs[batch_idx][length_idx]
+                              for batch_idx in xrange(batch)], dtype=numpy.int32))
+                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
 
-            batch_lm_inputs.append(numpy.array(batch_inputs[batch_idx], dtype=numpy.int32)[0:max_n_steps])
-            batch_lm_targets.append(numpy.array(batch_targets[batch_idx], dtype=numpy.int32)[0:max_n_steps])
+        # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
+        for length_idx in xrange(self.num_steps):
+            batch_lm_targets.append(
+                    numpy.array([batch_targets[batch_idx][length_idx]
+                              for batch_idx in xrange(batch)], dtype=numpy.int32))
+                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
 
+            # batch_weight = numpy.ones(self.batch_size, dtype=numpy.float32)
+            batch_weight = numpy.ones(batch, dtype=numpy.float32)
+            # for batch_idx in xrange(self.batch_size):
+            for batch_idx in xrange(batch):
+                # We set weight to 0 if the corresponding target is a PAD symbol.
+                # The corresponding target is decoder_input shifted by 1 forward.
+                if length_idx < self.num_steps - 1:
+                    target = batch_targets[batch_idx][length_idx + 1]
+                if length_idx == self.num_steps - 1 or target == data_utils.PAD_ID:
+                    batch_weight[batch_idx] = 0.0
+            batch_weights.append(batch_weight)
 
-        return batch_lm_inputs, batch_lm_targets, n_target_words
+        return batch_lm_inputs, batch_lm_targets, batch_weights, n_target_words
 
-    def train_step(self, session, lm_inputs, lm_targets, op=None):
+    def train_step(self, session, lm_inputs, lm_targets, mask, op=None):
 
         if op is None:
             op = self.train_op
 
-        cost_, state_, _ = session.run(
-            [self.cost, self.final_state, op],
-            {self.input_data: lm_inputs, self.targets: lm_targets}
-        )
+        input_feed = {}
+        for l in xrange(self.num_steps):
+            input_feed[self.input_data[l].name] = lm_inputs[l]
+            input_feed[self.targets[l].name] = lm_targets[l]
+            input_feed[self.mask[l].name] = mask[l]
+
+        output_feed = [self.cost, self.final_state, op]
+
+        cost_, state_, _ = session.run(output_feed, feed_dict=input_feed)
 
         return cost_, state_

@@ -8,6 +8,7 @@ logging = tf.logging
 
 tf.app.flags.DEFINE_string('model_name', 'something.ckpt', 'Model name')
 tf.app.flags.DEFINE_string('train_dir', '/home/gian/train_lms/', 'Train directory')
+tf.app.flags.DEFINE_string('best_models_dir', '/home/gian/train_lms/', 'Train directory')
 tf.app.flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
 tf.app.flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 tf.app.flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
@@ -34,11 +35,11 @@ flags.DEFINE_integer("max_epochs", 39, "Maximum nnumber of epochs to train the L
 flags.DEFINE_integer("early_stop_patience", 0, "Maximum number of validation steps with no improvement before stop training. If 0, no early stopping will be used.")
 flags.DEFINE_integer("batch_size", 32, "Mini-batch size.")
 flags.DEFINE_integer("num_steps", 35, "Maximum number of steps to unroll the network.")
-flags.DEFINE_float("dropout_rate", 0.5, "The dropout rate to be applied to the LM when training.")
+flags.DEFINE_float("dropout_rate", 0.0, "The dropout rate to be applied to the LM when training.")
 
 # verbosity and checkpoints
 tf.app.flags.DEFINE_integer('steps_per_checkpoint', 100, 'How many training steps to do per checkpoint.')
-tf.app.flags.DEFINE_integer('steps_per_validation', 1000, 'How many training steps to do between each validation.')
+tf.app.flags.DEFINE_integer('steps_per_validation', 50, 'How many training steps to do between each validation.')
 tf.app.flags.DEFINE_integer('steps_verbosity', 10, 'How many training steps to do between each information print.')
 
 FLAGS = flags.FLAGS

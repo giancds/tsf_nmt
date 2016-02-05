@@ -15,6 +15,7 @@ import tensorflow as tf
 from tensorflow.models.rnn import seq2seq, rnn
 from tensorflow.python.ops import nn_ops, embedding_ops  #, rnn
 from tensorflow.python.framework import ops
+from tensorflow.python.ops import array_ops
 import data_utils
 import attention
 import build_ops
@@ -380,6 +381,8 @@ class Seq2SeqModel(object):
 
     def encode(self, source, translate=False):
 
+        b_size = array_ops.shape(source[0])[0]
+
         # encoder embedding layer and recurrent layer
         # with tf.name_scope('bidirectional_encoder') as scope:
         with tf.name_scope('reverse_encoder') as scope:
@@ -387,7 +390,7 @@ class Seq2SeqModel(object):
                 scope.reuse_variables()
             context, decoder_initial_state = _reverse_encoder(
                     source, self.src_embedding, self.encoder_cell,
-                    self.batch_size, dtype=self.dtype)
+                    b_size, dtype=self.dtype)
 
             # First calculate a concatenation of encoder outputs to put attention on.
             top_states = [
@@ -442,17 +445,21 @@ class Seq2SeqModel(object):
         for length_idx in xrange(encoder_size):
             batch_encoder_inputs.append(
                     numpy.array([encoder_inputs[batch_idx][length_idx]
-                              for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+                              for batch_idx in xrange(batch)], dtype=numpy.int32))
 
         # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
         for length_idx in xrange(decoder_size):
             batch_decoder_inputs.append(
                     numpy.array([decoder_inputs[batch_idx][length_idx]
-                              for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+                              for batch_idx in xrange(batch)], dtype=numpy.int32))
 
             # Create target_weights to be 0 for targets that are padding.
-            batch_weight = numpy.ones(self.batch_size, dtype=numpy.float32)
-            for batch_idx in xrange(self.batch_size):
+            # batch_weight = numpy.ones(self.batch_size, dtype=numpy.float32)
+            batch_weight = numpy.ones(batch, dtype=numpy.float32)
+            # for batch_idx in xrange(self.batch_size):
+            for batch_idx in xrange(batch):
                 # We set weight to 0 if the corresponding target is a PAD symbol.
                 # The corresponding target is decoder_input shifted by 1 forward.
                 if length_idx < decoder_size - 1:

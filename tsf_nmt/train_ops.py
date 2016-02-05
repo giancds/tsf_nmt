@@ -172,7 +172,10 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                 avg_eval_loss = total_eval_loss / len(buckets)
                 avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
 
-                print('\n  eval: averaged perplexity %.8f' % avg_ppx)
+                if avg_ppx > 1000.0:
+                    print('\n  eval: averaged perplexity > 1000.0')
+                else:
+                    print('\n  eval: averaged perplexity %.8f' % avg_ppx)
                 print('  eval: averaged loss %.8f\n' % avg_eval_loss)
 
                 sys.stdout.flush()
@@ -190,7 +193,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                         # Save checkpoint
                         print('Saving the best model so far...')
                         best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
-                        model.saver.save(sess, best_model_path, global_step=0)
+                        model.saver.save(sess, best_model_path, global_step=model.global_step)
                     else:
                         sess.run(model.estop_counter_update_op)
                         if model.estop_counter.eval() >= estop:
@@ -253,11 +256,11 @@ def train_lm(FLAGS=None):
 
             start_time = time.time()
 
-            lm_inputs, lm_targets, n_words = model.get_train_batch(train_data)
+            lm_inputs, lm_targets, lm_mask, n_words = model.get_train_batch(train_data)
 
             n_target_words += n_words
 
-            cost, _ = model.train_step(session=sess, lm_inputs=lm_inputs, lm_targets=lm_targets)
+            cost, _ = model.train_step(session=sess, lm_inputs=lm_inputs, lm_targets=lm_targets, mask=lm_mask)
 
             currloss = model.current_loss.eval()
             sess.run(model.current_loss.assign(currloss + cost))
@@ -328,9 +331,10 @@ def train_lm(FLAGS=None):
                 total_valid_cost = 0.0
 
                 valid_batch_size = len(valid_data)
-                valid_inputs, valid_targets, _ = model.get_train_batch(valid_data, batch=valid_batch_size)
+                valid_inputs, valid_targets, valid_mask, _ = model.get_train_batch(valid_data, batch=valid_batch_size)
 
-                valid_cost, _ = model.train_step(session=sess, lm_inputs=valid_inputs, lm_targets=valid_targets, op=tf.no_op())
+                valid_cost, _ = model.train_step(session=sess, lm_inputs=valid_inputs, lm_targets=valid_targets,
+                                                 mask=valid_mask, op=tf.no_op())
 
                 total_valid_cost += valid_cost
 
@@ -338,7 +342,10 @@ def train_lm(FLAGS=None):
                 avg_eval_loss = total_valid_cost
                 avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
 
-                print('\n  eval: averaged perplexity %.8f' % avg_ppx)
+                if avg_ppx > 1000.0:
+                    print('\n  eval: averaged perplexity > 1000.0')
+                else:
+                    print('\n  eval: averaged perplexity %.8f' % avg_ppx)
                 print('  eval: averaged loss %.8f\n' % avg_eval_loss)
 
                 # check early stop - if early stop patience is greater than 0, test it
@@ -347,9 +354,10 @@ def train_lm(FLAGS=None):
                         sess.run(model.best_eval_loss.assign(avg_eval_loss))
                         sess.run(model.estop_counter_reset_op)
                         # Save checkpoint
+                        # TODO: check why is not keeping the best models.
                         print('Saving the best model so far...')
                         best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
-                        model.saver.save(sess, best_model_path, global_step=0)
+                        model.saver.save(sess, best_model_path, global_step=model.global_step)
                     else:
                         sess.run(model.estop_counter_update_op)
                         if model.estop_counter.eval() >= estop:

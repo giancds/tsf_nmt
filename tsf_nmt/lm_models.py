@@ -7,7 +7,7 @@ import random
 import numpy
 import tensorflow as tf
 from tensorflow.models.rnn import seq2seq, rnn
-from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import array_ops, nn_ops
 
 import data_utils
 import build_ops
@@ -111,31 +111,28 @@ class LMModel(object):
 
         softmax_loss_function = sampled_loss
 
-        # TODO: check here
-        loss = seq2seq.sequence_loss_by_example(outputs,
-                                                self.targets,
-                                                self.mask,
-                                                vocab_size,
-                                                softmax_loss_function=softmax_loss_function)
+        if is_training:
+            loss = seq2seq.sequence_loss_by_example(outputs,
+                                                    self.targets,
+                                                    self.mask,
+                                                    vocab_size,
+                                                    softmax_loss_function=softmax_loss_function)
 
-        b_size = array_ops.shape(self.input_data[0])[0]
-        self._cost = cost = tf.reduce_sum(loss) / tf.to_float(b_size)
-        self._final_state = states[-1]
+            b_size = array_ops.shape(self.input_data[0])[0]
+            self._cost = cost = tf.reduce_sum(loss) / tf.to_float(b_size)
+            self._final_state = states[-1]
 
-        if not is_training:
-            return
+            tvars = tf.trainable_variables()
+            grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
+                                              max_grad_norm)
+            optimizer = tf.train.GradientDescentOptimizer(self.lr)
+            self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
 
-        tvars = tf.trainable_variables()
-        grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
-                                          max_grad_norm)
-        optimizer = tf.train.GradientDescentOptimizer(self.lr)
-        self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
+        else:
+            logit = tf.nn.xw_plus_b(outputs[-1], w, b)
+            self.logits = nn_ops.softmax(logit)
 
         self.saver = tf.train.Saver(tf.all_variables())
-
-    @property
-    def initial_state(self):
-        return self._initial_state
 
     @property
     def cost(self):
@@ -170,13 +167,13 @@ class LMModel(object):
             encoder_input = random.choice(data)
 
             # Encoder inputs are padded and then reversed.
-            encoder_pad = [data_utils.PAD_ID] * (max_n_steps - len(encoder_input))
-            batch_inputs.append(list(encoder_input + encoder_pad))
+            lm_pad = [data_utils.PAD_ID] * (max_n_steps - len(encoder_input))
+            batch_inputs.append(list(encoder_input + lm_pad))
 
             n_target_words += len(encoder_input)
 
             # Decoder inputs get an extra "GO" symbol, and are padded then.
-            batch_targets.append([data_utils.GO_ID] + list(encoder_input + encoder_pad))
+            batch_targets.append([data_utils.GO_ID] + list(encoder_input + lm_pad))
 
         # Now we create batch-major vectors from the data selected above.
         batch_lm_inputs, batch_lm_targets, batch_weights = [], [], []
@@ -185,18 +182,14 @@ class LMModel(object):
             batch_lm_inputs.append(
                     numpy.array([batch_inputs[batch_idx][length_idx]
                               for batch_idx in xrange(batch)], dtype=numpy.int32))
-                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
 
         # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
         for length_idx in xrange(self.num_steps):
             batch_lm_targets.append(
                     numpy.array([batch_targets[batch_idx][length_idx]
                               for batch_idx in xrange(batch)], dtype=numpy.int32))
-                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
 
-            # batch_weight = numpy.ones(self.batch_size, dtype=numpy.float32)
             batch_weight = numpy.ones(batch, dtype=numpy.float32)
-            # for batch_idx in xrange(self.batch_size):
             for batch_idx in xrange(batch):
                 # We set weight to 0 if the corresponding target is a PAD symbol.
                 # The corresponding target is decoder_input shifted by 1 forward.
@@ -224,3 +217,64 @@ class LMModel(object):
         cost_, state_, _ = session.run(output_feed, feed_dict=input_feed)
 
         return cost_, state_
+
+    def get_translate_batch(self, data):
+        """Get a random batch of data from the specified bucket, prepare for step.
+        To feed data in step(..) it must be a list of batch-major vectors, while
+        data here contains single length-major cases. So the main logic of this
+        function is to re-index data cases to be in the proper format for feeding.
+        Args:
+          data: a tuple of size len(self.buckets) in which each element contains
+            lists of pairs of input and output data that we use to create a batch.
+          bucket_id: integer, which bucket to get the batch for.
+        Returns:
+          The triple (encoder_inputs, decoder_inputs, target_weights) for
+          the constructed batch that has the proper format to call step(...) later.
+        """
+        encoder_size, decoder_size = (len(data), 1)
+        lm_inputs, lm_targets = [], []
+
+        # Get a random batch of encoder and decoder inputs from data,
+        # pad them if needed, reverse encoder inputs and add GO to decoder.
+        for _ in xrange(self.batch_size):
+            # encoder_input, _, decoder_input = random.choice(d)
+            lm_input, lm_target = random.choice(data)
+
+            # Encoder inputs are padded and then reversed.
+            lm_pad = [data_utils.PAD_ID] * (encoder_size - len(lm_input))
+            lm_inputs.append(list(reversed(lm_input + lm_pad)))
+
+            # Decoder inputs get an extra "GO" symbol, and are padded then.
+            decoder_pad_size = decoder_size - len(lm_target) - 1
+            lm_targets.append([data_utils.GO_ID] + lm_target +
+                                  [data_utils.PAD_ID] * decoder_pad_size)
+
+        # Now we create batch-major vectors from the data selected above.
+        batch_encoder_inputs, batch_decoder_inputs = [], []
+
+        # Batch encoder inputs are just re-indexed encoder_inputs.
+        for length_idx in xrange(encoder_size):
+            batch_encoder_inputs.append(
+                    numpy.array([lm_inputs[batch_idx][length_idx]
+                              for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+
+        # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
+        for length_idx in xrange(decoder_size):
+            batch_decoder_inputs.append(
+                    numpy.array([lm_targets[batch_idx][length_idx]
+                              for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+
+        return batch_encoder_inputs, batch_decoder_inputs
+
+    def decode_step(self, session, lm_inputs, lm_targets, mask):
+
+        input_feed = {}
+
+        for l in xrange(self.num_steps):
+            input_feed[self.input_data[l].name] = lm_inputs[l]
+            input_feed[self.targets[l].name] = lm_targets[l]
+            input_feed[self.mask[l].name] = mask[l]
+
+        output_feed = [self.logits]
+
+        return output_feed[0]

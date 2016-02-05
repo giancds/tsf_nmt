@@ -154,18 +154,25 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                 # Run evals on development set and print their perplexity.
                 for bucket_id in xrange(len(buckets)):
 
-                    valid_batch_size = len(dev_set[bucket_id])
-                    encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set,
-                                                                                              bucket_id,
-                                                                                              valid_batch_size)
+                    n_steps = len(dev_set[bucket_id]) / model.batch_size
 
-                    _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
-                                                       decoder_inputs=decoder_inputs, target_weights=target_weights,
-                                                       bucket_id=bucket_id)
+                    bucket_loss = 0.0
 
-                    total_eval_loss += eval_loss
+                    for _ in xrange(n_steps):
 
-                    eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
+                        encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set,
+                                                                                                  bucket_id)
+
+                        _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+                                                           decoder_inputs=decoder_inputs, target_weights=target_weights,
+                                                           bucket_id=bucket_id)
+
+                        bucket_loss += eval_loss
+
+                    bucket_avg_loss = bucket_loss / n_steps
+                    total_eval_loss += bucket_avg_loss
+
+                    eval_ppx = math.exp(bucket_avg_loss) if eval_loss < 300 else float('inf')
                     total_ppx += eval_ppx
                     print('  eval: bucket %d perplexity %.4f' % (bucket_id, eval_ppx))
 

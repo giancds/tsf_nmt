@@ -291,8 +291,10 @@ class Seq2SeqModel(object):
                 for i in xrange(len(self.encoder_inputs), self.max_len):
                     self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
 
+                b_size = array_ops.shape(self.encoder_inputs[0])[0]
+
                 # context, decoder_initial_state, attention_states, input_length
-                self.ret0, self.ret1, self.ret2 = self.encode(self.encoder_inputs)
+                self.ret0, self.ret1, self.ret2 = self.encode(self.encoder_inputs, b_size)
 
                 # shape of this placeholder: the first None indicate the batch size and the second the input length
                 self.attn_plcholder = tf.placeholder(tf.float32,
@@ -309,11 +311,16 @@ class Seq2SeqModel(object):
                         tf.placeholder(tf.float32, shape=[None, decoder_size], name="decoder_state{0}".format(i))
                     )
 
+                decoder_states = None
+                if self.output_attention:
+                    decoder_states = self.decoder_init_plcholders
+
                 self.logits, self.states, self.decoder_states = _decode(
                     [self.decoder_inputs[0]], self.decoder_cell, self.decoder_init_plcholder, self.attn_plcholder,
-                    self.target_vocab_size, self.output_projection, batch_size=self.batch_size,
+                    self.target_vocab_size, self.output_projection, batch_size=b_size,
                     attention_type=self.attention_type, content_function=self.content_function, do_decode=True,
-                    input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention
+                    input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
+                    decoder_states=decoder_states
                 )
 
                 # If we use output projection, we need to project outputs for decoding.
@@ -365,13 +372,15 @@ class Seq2SeqModel(object):
         -------
 
         """
+        b_size = array_ops.shape(source[0])[0]
+
         # encode source
-        context, decoder_initial_state, attention_states = self.encode(source)
+        context, decoder_initial_state, attention_states = self.encode(source, b_size)
 
         # decode target - note that we pass decoder_states as None when training the model
         outputs, states, decoder_states = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
                                                   self.target_vocab_size, self.output_projection,
-                                                  batch_size=self.batch_size, attention_type=self.attention_type,
+                                                  batch_size=b_size, attention_type=self.attention_type,
                                                   do_decode=do_decode, input_feeding=self.input_feeding,
                                                   content_function=self.content_function, dtype=self.dtype,
                                                   output_attention=self.output_attention, decoder_states=None)
@@ -379,9 +388,7 @@ class Seq2SeqModel(object):
         # return the output (logits) and internal states
         return outputs, states
 
-    def encode(self, source, translate=False):
-
-        b_size = array_ops.shape(source[0])[0]
+    def encode(self, source, batch_size, translate=False):
 
         # encoder embedding layer and recurrent layer
         # with tf.name_scope('bidirectional_encoder') as scope:
@@ -390,7 +397,7 @@ class Seq2SeqModel(object):
                 scope.reuse_variables()
             context, decoder_initial_state = _reverse_encoder(
                     source, self.src_embedding, self.encoder_cell,
-                    b_size, dtype=self.dtype)
+                    batch_size, dtype=self.dtype)
 
             # First calculate a concatenation of encoder outputs to put attention on.
             top_states = [
@@ -445,14 +452,12 @@ class Seq2SeqModel(object):
         for length_idx in xrange(encoder_size):
             batch_encoder_inputs.append(
                     numpy.array([encoder_inputs[batch_idx][length_idx]
-                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
                               for batch_idx in xrange(batch)], dtype=numpy.int32))
 
         # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
         for length_idx in xrange(decoder_size):
             batch_decoder_inputs.append(
                     numpy.array([decoder_inputs[batch_idx][length_idx]
-                              # for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
                               for batch_idx in xrange(batch)], dtype=numpy.int32))
 
             # Create target_weights to be 0 for targets that are padding.
@@ -509,7 +514,7 @@ class Seq2SeqModel(object):
 
         # Since our targets are decoder inputs shifted by one, we need one more.
         last_target = self.decoder_inputs[decoder_size].name
-        input_feed[last_target] = numpy.zeros([self.batch_size], dtype=numpy.int32)
+        input_feed[last_target] = numpy.zeros([len(encoder_inputs[0])], dtype=numpy.int32)
 
         # Output feed: depends on whether we do a backward step or not.
         output_feed = [self.updates[bucket_id],  # Update Op that does SGD.

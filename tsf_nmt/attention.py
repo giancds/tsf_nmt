@@ -567,7 +567,7 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
     return ds
 
 
-def _attention_decoder_output(decoder_inputs, initial_state, attention_states, cell, batch_size, attention_type=None,
+def     _attention_decoder_output(decoder_inputs, initial_state, attention_states, cell, batch_size, attention_type=None,
                               output_size=None, loop_function=None, window_size=10, cell_outputs=None,
                               content_function=VINYALS_KAISER, dtype=tf.float32, scope=None):
     """
@@ -750,6 +750,17 @@ def _attention_decoder_output(decoder_inputs, initial_state, attention_states, c
 
 
 def _decoder_output_attention(decoder_states, attn_size):
+    """
+
+    Parameters
+    ----------
+    decoder_states
+    attn_size
+
+    Returns
+    -------
+
+    """
 
     attn_length = len(decoder_states)
 

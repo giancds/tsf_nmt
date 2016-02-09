@@ -71,7 +71,8 @@ def _decode(target,
             attention_type=None,
             content_function='vinyals_kayser',
             output_attention=False,
-            decoder_states=None,
+            translate=False,
+            beam_size=12,
             dtype=tf.float32):
     assert attention_type is not None
 
@@ -89,7 +90,7 @@ def _decode(target,
             attention_type=attention_type, dtype=dtype,
             content_function=content_function,
             output_attention=output_attention,
-            cell_outputs=decoder_states,
+            translate=translate, beam_size=beam_size,
             scope='decoder_with_attention'
         )
 
@@ -136,6 +137,7 @@ class Seq2SeqModel(object):
                  cpu_only=False,
                  output_attention=False,
                  early_stop_patience=0,
+                 beam_size=12,
                  dtype=tf.float32):
         """Create the model.
         Args:
@@ -259,7 +261,8 @@ class Seq2SeqModel(object):
             # Create the internal multi-layer cell for our RNN.
             self.encoder_cell, self.decoder_cell = build_ops.build_nmt_multicell_rnn(
                     num_layers_encoder, num_layers_decoder, encoder_size, decoder_size,
-                    source_proj_size, target_proj_size, use_lstm=use_lstm, dropout=dropout)
+                    source_proj_size, target_proj_size, use_lstm=use_lstm, dropout=dropout,
+                    input_feeding=True)
 
             # The seq2seq function: we use embedding for the input and attention.
             def seq2seq_f(encoder_inputs, decoder_inputs, do_decode):
@@ -286,48 +289,21 @@ class Seq2SeqModel(object):
             # Training outputs and losses.
             if forward_only:
 
-                # self.outputs, self.losses = self.translation_inference(self.encoder_inputs)
-
                 for i in xrange(len(self.encoder_inputs), self.max_len):
                     self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
 
                 b_size = array_ops.shape(self.encoder_inputs[0])[0]
 
-                # context, decoder_initial_state, attention_states, input_length
-                self.ret0, self.ret1, self.ret2 = self.encode(self.encoder_inputs, b_size)
+                # context, decoder_initial_state, attention_states
+                self.context, self.decoder_initial_state, self.attention_states = self.encode(self.encoder_inputs, b_size)
 
-                # shape of this placeholder: the first None indicate the batch size and the second the input length
-                self.attn_plcholder = tf.placeholder(tf.float32,
-                                                     shape=[None, self.ret2.get_shape()[1], target_proj_size],
-                                                     name="attention_states")
-
-                self.decoder_init_plcholder = tf.placeholder(tf.float32,
-                                                             shape=[None, (target_proj_size) * 2 * num_layers_decoder],
-                                                             name="decoder_init")
-
-                self.decoder_states_holders = []
-                for i in xrange(self.max_len):
-                    self.decoder_states_holders.append(
-                        tf.placeholder(tf.float32, shape=[None, decoder_size], name="decoder_state{0}".format(i))
-                    )
-
-                decoder_states = None
-                if self.output_attention:
-                    decoder_states = self.decoder_init_plcholders
-
-                self.logits, self.states, self.decoder_states = _decode(
-                    [self.decoder_inputs[0]], self.decoder_cell, self.decoder_init_plcholder, self.attn_plcholder,
+                self.outputs, self.scores, _ = _decode(
+                    [self.decoder_inputs[0]], self.decoder_cell, self.decoder_initial_state, self.attention_states,
                     self.target_vocab_size, self.output_projection, batch_size=b_size,
                     attention_type=self.attention_type, content_function=self.content_function, do_decode=True,
                     input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
-                    decoder_states=decoder_states
+                    translate=forward_only, beam_size=beam_size
                 )
-
-                # If we use output projection, we need to project outputs for decoding.
-                if self.output_projection is not None:
-                    self.logits = [tf.nn.xw_plus_b(logit, self.output_projection[0], self.output_projection[1])
-                                   for logit in self.logits]
-                    self.logits =[nn_ops.softmax(logit) for logit in self.logits]
 
             else:
                 self.outputs, self.losses = seq2seq.model_with_buckets(
@@ -572,118 +548,51 @@ class Seq2SeqModel(object):
 
         return batch_encoder_inputs, batch_decoder_inputs
 
-    def translation_step(self, session, token_ids, beam_size=5, normalize=True, dump_remaining=False):
-
-        sample = []
-        sample_score = []
-
-        live_hyp = 1
-        dead_hyp = 0
-
-        hyp_samples = [[]] * live_hyp
-        hyp_scores = numpy.zeros(live_hyp).astype('float32')
+    def translation_step(self, session, token_ids, normalize=True):
 
         # Get a 1-element batch to feed the sentence to the model
         encoder_inputs, decoder_inputs = self.get_translate_batch([(token_ids, [])])
         decoder_inputs = decoder_inputs[-1]
 
         # here we encode the input sentence
-        encoder_input_feed = {}
+        input_feed = {}
         for l in xrange(self.max_len):
-            encoder_input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+            input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+
+        input_feed[self.decoder_inputs[0].name] = decoder_inputs[0],
 
         # we select the last element of ret0 to keep as it is a list of hidden_states
-        encoder_output_feed = [self.ret0[-1], self.ret1, self.ret2]
+        output_feed = [self.outputs, self.scores]
 
-        # get the return of encoding step: hidden_states, decoder_initial_states, attention_states
-        ret = session.run(encoder_output_feed, encoder_input_feed)
+        # outputs will be a list of length beam_size containing the best generated hypothesis
+        outputs, scores = session.run(output_feed, input_feed)
 
-        # here we get info to the decode step
-        attention_states = ret[2]
-        shape = ret[1][0].shape
-        decoder_init =ret[1][0].reshape(1, shape[0])
-        decoder_states = None
+        sample, sample_score = [], []
+        for i in xrange(outputs.shape[0]):
+            # retrieve the rows of each array
+            hypothesis = outputs[i, :].tolist()
+            hyp_score = scores[i, :].tolist()
 
-        # we must retrieve the last state to feed the decoder run
-        decoder_output_feed = [self.logits[-1], self.states[-1]]
+            try:
+                # ge the index of the EOS symbol
+                idx = hypothesis.index(data_utils.EOS_ID) - 1
+            except ValueError:
+                idx = len(hypothesis)
 
-        for ii in xrange(self.max_len):
+            hypothesis = hypothesis[0:idx]
+            hyp_score = numpy.sum(hyp_score[0:idx]) / len(hypothesis)
+            if normalize:
+                hyp_score /= len(hypothesis)
 
-            # we must feed decoder_initial_state and attention_states to run one decode step
-            decoder_input_feed = {self.decoder_inputs[0].name : decoder_inputs,
-                                  self.decoder_init_plcholder.name: decoder_init,
-                                  self.attn_plcholder.name: attention_states}
+            sample.append(hypothesis)
+            sample_score.append(hyp_score)
 
-            if decoder_states is not None:
-                for i in xrange(len(decoder_states)):
-                    decoder_input_feed["decoder_state{0}".format(i)] = decoder_states[i]
+        n_best = numpy.array(sample)
+        n_best_scores = numpy.array(sample_score)
 
-            ret = session.run(decoder_output_feed, decoder_input_feed)
+        order = n_best_scores.argsort()[::-1]
 
-            next_p = ret[0]
-            next_state = ret[1]
-            decoder_states = ret[2]
+        n_best = n_best[order]
+        n_best_scores = n_best_scores[order]
 
-            cand_scores = hyp_scores[:, None] - numpy.log(next_p)
-            cand_flat = cand_scores.flatten()
-            ranks_flat = cand_flat.argsort()[:(beam_size-dead_hyp)]
-
-            voc_size = next_p.shape[1]
-            trans_indices = ranks_flat / voc_size
-            word_indices = ranks_flat % voc_size
-            costs = cand_flat[ranks_flat]
-
-            new_hyp_samples = []
-            new_hyp_scores = numpy.zeros(beam_size-dead_hyp).astype('float32')
-            new_hyp_states = []
-
-            for idx, [ti, wi] in enumerate(zip(trans_indices, word_indices)):
-                new_hyp_samples.append(hyp_samples[ti]+[wi])
-                new_hyp_scores[idx] = copy.copy(costs[ti])
-                new_hyp_states.append(copy.copy(next_state[ti]))
-
-            # check the finished samples
-            new_live_k = 0
-            hyp_samples = []
-            hyp_scores = []
-            hyp_states = []
-
-            for idx in xrange(len(new_hyp_samples)):
-                if new_hyp_samples[idx][-1] == data_utils.EOS_ID:
-                    sample.append(new_hyp_samples[idx])
-                    sample_score.append(new_hyp_scores[idx])
-                    dead_hyp += 1
-                else:
-                    new_live_k += 1
-                    hyp_samples.append(new_hyp_samples[idx])
-                    hyp_scores.append(new_hyp_scores[idx])
-                    hyp_states.append(new_hyp_states[idx])
-            hyp_scores = numpy.array(hyp_scores)
-            live_hyp = new_live_k
-
-            if new_live_k < 1:
-                break
-            if dead_hyp >= beam_size:
-                break
-
-            decoder_inputs = numpy.array([w[-1] for w in hyp_samples])
-            decoder_init = numpy.array(hyp_states)
-
-        # dump every remaining one
-        if dump_remaining:
-            if live_hyp > 0:
-                for idx in xrange(live_hyp):
-                    sample.append(hyp_samples[idx])
-                    sample_score.append(hyp_scores[idx])
-
-        # normalize scores according to sequence lengths
-        if normalize:
-            lengths = numpy.array([len(s) for s in sample])
-            sample_score = sample_score / lengths
-
-        # sort the samples by score (it is in log-scale, therefore lower is better)
-        sidx = numpy.argsort(sample_score)
-        sample = numpy.array(sample)[sidx]
-        sample_score = numpy.array(sample_score)[sidx]
-
-        return sample.tolist(), sample_score.tolist()
+        return n_best.tolist(), n_best_scores.tolist()

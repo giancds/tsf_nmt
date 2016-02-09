@@ -127,9 +127,14 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                     print 'NaN detected'
                     break
 
-                print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx %.8f - avg. %.2f K target words/sec' %
-                      (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
-                       step_time, loss, ppx, (target_words_speed / 1000.0)))
+                if ppx > 1000.0:
+                    print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx > %.8f - avg. %.2f K target words/sec' %
+                          (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
+                           step_time, loss, 1000.0, (target_words_speed / 1000.0)))
+                else:
+                    print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx %.8f - avg. %.2f K target words/sec' %
+                          (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
+                           step_time, loss, ppx, (target_words_speed / 1000.0)))
 
                 n_target_words = 0
                 step_time = 0.0
@@ -194,6 +199,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
                 # check early stop - if early stop patience is greater than 0, test it
                 if estop > 0:
+
                     if avg_eval_loss < model.best_eval_loss.eval():
                         sess.run(model.best_eval_loss.assign(avg_eval_loss))
                         sess.run(model.estop_counter_reset_op)
@@ -201,6 +207,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                         print('Saving the best model so far...')
                         best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
                         model.saver.save(sess, best_model_path, global_step=model.global_step)
+
                     else:
                         sess.run(model.estop_counter_update_op)
                         if model.estop_counter.eval() >= estop:
@@ -210,6 +217,13 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                     print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
                     print('early stop patience: %d - max %d\n' % (int(model.estop_counter.eval()), estop))
 
+                else:
+
+                    if avg_eval_loss < model.best_eval_loss.eval():
+                        sess.run(model.best_eval_loss.assign(avg_eval_loss))
+
+                    print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
+
             step_time += (time.time() - start_time) / FLAGS.steps_verbosity
             words_time += (time.time() - start_time)
 
@@ -218,6 +232,50 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
         # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
         print("\nTraining finished!!\n")
+
+        print("Final validation:")
+
+        total_eval_loss = 0.0
+        total_ppx = 0.0
+
+        print('\n')
+
+        # Run evals on development set and print their perplexity.
+        for bucket_id in xrange(len(buckets)):
+
+            n_steps = len(dev_set[bucket_id]) / model.batch_size
+
+            bucket_loss = 0.0
+
+            for _ in xrange(n_steps):
+                encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set,
+                                                                                          bucket_id)
+
+                _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+                                                   decoder_inputs=decoder_inputs, target_weights=target_weights,
+                                                   bucket_id=bucket_id)
+
+                bucket_loss += eval_loss
+
+            bucket_avg_loss = bucket_loss / n_steps
+            total_eval_loss += bucket_avg_loss
+
+            eval_ppx = math.exp(bucket_avg_loss) if eval_loss < 300 else float('inf')
+            total_ppx += eval_ppx
+            print('  eval: bucket %d perplexity %.4f' % (bucket_id, eval_ppx))
+
+        avg_eval_loss = total_eval_loss / len(buckets)
+        avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
+
+        if avg_ppx > 1000.0:
+            print('\n  eval: averaged perplexity > 1000.0')
+        else:
+            print('\n  eval: averaged perplexity %.8f' % avg_ppx)
+        print('  eval: averaged loss %.8f\n' % avg_eval_loss)
+
+        print('\n   best valid. loss during training: %.8f' % model.best_eval_loss.eval())
+
+        sys.stdout.flush()
 
 
 # TODO: there is a better way of turning dropout off during validation? - this is a little bit "hacky"
@@ -237,7 +295,7 @@ def train_lm(FLAGS=None):
     print('Preparing data in %s' % FLAGS.data_dir)
     src_train, src_dev, src_test = data_utils.prepare_lm_data(FLAGS)
 
-    with tf.Session() as sess:
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
 
         print('Creating layers.')
         initializer = tf.random_uniform_initializer(-FLAGS.init_scale, FLAGS.init_scale)
@@ -334,6 +392,7 @@ def train_lm(FLAGS=None):
                 checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
+            # TODO: check validation batches
             if current_step % FLAGS.steps_per_validation == 0:
                 total_valid_cost = 0.0
 
@@ -361,7 +420,7 @@ def train_lm(FLAGS=None):
                         sess.run(model.best_eval_loss.assign(avg_eval_loss))
                         sess.run(model.estop_counter_reset_op)
                         # Save checkpoint
-                        # TODO: check why is not keeping the best models.
+
                         print('Saving the best model so far...')
                         best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
                         model.saver.save(sess, best_model_path, global_step=model.global_step)

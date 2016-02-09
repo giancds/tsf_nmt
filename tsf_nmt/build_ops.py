@@ -89,7 +89,7 @@ def build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=True, dr
     return lm_rnncell
 
 
-def create_nmt_model(session, forward_only, model_path=None, FLAGS=None, buckets=None, translate=False):
+def create_nmt_model(session, forward_only, model_path=None, use_best=False, FLAGS=None, buckets=None, translate=False):
     """Create translation model and initialize or load parameters in session."""
 
     assert FLAGS is not None
@@ -135,10 +135,16 @@ def create_nmt_model(session, forward_only, model_path=None, FLAGS=None, buckets
                                     content_function=FLAGS.content_function,
                                     output_attention=FLAGS.output_attention,
                                     forward_only=forward_only,
+                                    beam_size=FLAGS.beam_size,
                                     early_stop_patience=FLAGS.early_stop_patience)
 
     if model_path is None:
-        ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+
+        if use_best:
+            ckpt = tf.train.get_checkpoint_state(FLAGS.best_models_dir)
+
+        else:
+            ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
 
         if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
             print('Reading model parameters from %s' % ckpt.model_checkpoint_path)

@@ -10,7 +10,7 @@ import data_utils
 from build_ops import create_nmt_model
 
 
-def decode_from_file(file_path, model_path=None, get_ids=True, FLAGS=None, buckets=None):
+def decode_from_file(file_path, model_path=None, use_best=False, get_ids=True, FLAGS=None, buckets=None):
 
     assert FLAGS is not None
     assert buckets is not None
@@ -19,7 +19,8 @@ def decode_from_file(file_path, model_path=None, get_ids=True, FLAGS=None, bucke
 
         # load model parameters.
         model = create_nmt_model(sess, model_path=model_path, forward_only=True,
-                                 FLAGS=FLAGS, buckets=buckets, translate=True)
+                                 use_best=use_best, FLAGS=FLAGS, buckets=buckets,
+                                 translate=True)
 
         # Load vocabularies.
         source_vocab_file = FLAGS.data_dir + \
@@ -56,18 +57,15 @@ def decode_from_file(file_path, model_path=None, get_ids=True, FLAGS=None, bucke
                         token_ids = [int(ss) for ss in sentence.strip().split()]
 
                     # Get output logits for the sentence.
-                    output_hypotheses, output_scores = model.translation_step(sess,
-                                                                              token_ids,
-                                                                              beam_size=FLAGS.beam_size,
-                                                                              dump_remaining=True)
+                    output_hypotheses, output_scores = model.translation_step(sess, token_ids)
 
                     outputs = output_hypotheses[0]
 
-                    try:
-                        if data_utils.EOS_ID in outputs:
-                            outputs = outputs[:outputs.index(data_utils.EOS_ID)]
-                    except ValueError:
-                        pass
+                    # try:
+                    #     if data_utils.EOS_ID in outputs:
+                    #         outputs = outputs[:outputs.index(data_utils.EOS_ID)]
+                    # except ValueError:
+                    #     pass
 
                     # Print out sentence corresponding to outputs.
                     destiny.write(" ".join([rev_tgt_vocab[output] for output in outputs]))

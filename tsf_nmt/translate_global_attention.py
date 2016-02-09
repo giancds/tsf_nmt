@@ -96,10 +96,10 @@ tf.app.flags.DEFINE_integer('steps_verbosity', 10,
 
 # pacience flags (learning_rate decay and early stop)
 tf.app.flags.DEFINE_integer('lr_rate_patience', 3, 'How many training steps to monitor.')
-tf.app.flags.DEFINE_integer('early_stop_patience', 20, 'How many training steps to monitor.')
+tf.app.flags.DEFINE_integer('early_stop_patience', 10, 'How many training steps to monitor.')
 
 # decoding/testing flags
-tf.app.flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
+tf.app.flags.DEFINE_boolean('decode_file', True, 'Set to True for decoding sentences in a file.')
 tf.app.flags.DEFINE_boolean('decode_input', False, 'Set to True for interactive decoding.')
 
 FLAGS = tf.app.flags.FLAGS
@@ -117,9 +117,11 @@ def main(_):
 
     elif FLAGS.decode_file:
 
-        model_path = FLAGS.train_dir + FLAGS.model_name + '-best-0'
+        # model_path = FLAGS.best_models_dir + FLAGS.model_name + '-best-0'
+        model_path = None
         decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en',
-                         model_path=model_path, FLAGS=FLAGS, buckets=_buckets)
+                         model_path=model_path, use_best=False, FLAGS=FLAGS,
+                         buckets=_buckets)
 
     else:
         train_nmt(FLAGS=FLAGS, buckets=_buckets)

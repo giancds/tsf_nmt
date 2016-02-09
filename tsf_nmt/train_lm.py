@@ -20,7 +20,7 @@ flags.DEFINE_integer("src_vocab_size", 30000, "Size of the vocabulary to be used
 
 tf.app.flags.DEFINE_string('optimizer', 'adam', 'Name of the optimizer to use (adagrad, adam, rmsprop or sgd).')
 flags.DEFINE_float("learning_rate", 0.001, "The learning rate used when updating the LM parameters.")
-flags.DEFINE_integer("start_lr_decay", 0, "Epoch to start learning_rate_decay. If 0, no decaying will be applied.")
+flags.DEFINE_integer("start_decay", 0, "Epoch to start learning_rate_decay. If 0, no decaying will be applied.")
 flags.DEFINE_float("lr_decay", 1.0, "Decay the learning rate by this much. If 1.0, no decaying will be applied.")
 
 flags.DEFINE_float("init_scale", 0.05, "The scale to use when initializing the LM weights and biases")

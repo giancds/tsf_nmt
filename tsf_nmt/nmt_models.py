@@ -262,7 +262,7 @@ class Seq2SeqModel(object):
             self.encoder_cell, self.decoder_cell = build_ops.build_nmt_multicell_rnn(
                     num_layers_encoder, num_layers_decoder, encoder_size, decoder_size,
                     source_proj_size, target_proj_size, use_lstm=use_lstm, dropout=dropout,
-                    input_feeding=True)
+                    input_feeding=input_feeding)
 
             # The seq2seq function: we use embedding for the input and attention.
             def seq2seq_f(encoder_inputs, decoder_inputs, do_decode):
@@ -359,7 +359,7 @@ class Seq2SeqModel(object):
                                                   batch_size=b_size, attention_type=self.attention_type,
                                                   do_decode=do_decode, input_feeding=self.input_feeding,
                                                   content_function=self.content_function, dtype=self.dtype,
-                                                  output_attention=self.output_attention, decoder_states=None)
+                                                  output_attention=self.output_attention)
 
         # return the output (logits) and internal states
         return outputs, states
@@ -451,7 +451,7 @@ class Seq2SeqModel(object):
 
         return batch_encoder_inputs, batch_decoder_inputs, batch_weights, n_target_words
 
-    def train_step(self, session, encoder_inputs, decoder_inputs, target_weights, bucket_id):
+    def train_step(self, session, encoder_inputs, decoder_inputs, target_weights, bucket_id, validation_step=False):
         """Run a step of the model feeding the given inputs.
         Args:
           session: tensorflow session to use.
@@ -459,7 +459,7 @@ class Seq2SeqModel(object):
           decoder_inputs: list of numpy int vectors to feed as decoder inputs.
           target_weights: list of numpy float vectors to feed as target weights.
           bucket_id: which bucket of the model to use.
-          forward_only: whether to do the backward step or only forward.
+          validation_step: whether to do the backward step or only forward.
           softmax: whether to apply softmax to the output_logits before returning them
         Returns:
           A triple consisting of gradient norm (or None if we did not do backward),
@@ -493,12 +493,24 @@ class Seq2SeqModel(object):
         input_feed[last_target] = numpy.zeros([len(encoder_inputs[0])], dtype=numpy.int32)
 
         # Output feed: depends on whether we do a backward step or not.
-        output_feed = [self.updates[bucket_id],  # Update Op that does SGD.
-                       self.gradient_norms[bucket_id],  # Gradient norm.
-                       self.losses[bucket_id]]  # Loss for this batch.
+        if validation_step:
+            output_feed = [self.losses[bucket_id]]  # Loss for this batch.
+
+        else:
+            output_feed = [self.updates[bucket_id],  # Update Op that does SGD.
+                           self.gradient_norms[bucket_id],  # Gradient norm.
+                           self.losses[bucket_id]]  # Loss for this batch.
 
         outputs = session.run(output_feed, feed_dict=input_feed)
-        return outputs[1], outputs[2], None  # Gradient norm, loss, no outputs.
+
+        # function return: depends on whether we do a backward step or not.
+        if validation_step:
+            # No gradient norm, loss, no outputs.
+            return None, outputs[0], None
+
+        else:
+            # Gradient norm, loss, no outputs.
+            return outputs[1], outputs[2], None
 
     def get_translate_batch(self, data):
         """Get a random batch of data from the specified bucket, prepare for step.

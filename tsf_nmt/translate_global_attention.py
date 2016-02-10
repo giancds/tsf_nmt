@@ -87,19 +87,17 @@ tf.app.flags.DEFINE_string('source_lang', 'en', 'Source language extension.')
 tf.app.flags.DEFINE_string('target_lang', 'pt', 'Target language extension.')
 
 # verbosity and checkpoints
-tf.app.flags.DEFINE_integer('steps_per_checkpoint', 100,
-                            'How many training steps to do per checkpoint.')
-tf.app.flags.DEFINE_integer('steps_per_validation', 1000,
-                            'How many training steps to do between each validation.')
-tf.app.flags.DEFINE_integer('steps_verbosity', 10,
-                            'How many training steps to do between each information print.')
+tf.app.flags.DEFINE_integer('steps_per_checkpoint', 100, 'How many training steps to do per checkpoint.')
+tf.app.flags.DEFINE_integer('steps_per_validation', 1000, 'How many training steps to do between each validation.')
+tf.app.flags.DEFINE_integer('steps_verbosity', 10, 'How many training steps to do between each information print.')
 
 # pacience flags (learning_rate decay and early stop)
 tf.app.flags.DEFINE_integer('lr_rate_patience', 3, 'How many training steps to monitor.')
-tf.app.flags.DEFINE_integer('early_stop_patience', 10, 'How many training steps to monitor.')
+tf.app.flags.DEFINE_integer('early_stop_patience', 20, 'How many training steps to monitor.')
+tf.app.flags.DEFINE_integer('early_stop_after_epoch', 11, 'Start monitoring early_stop after this epoch.')
 
 # decoding/testing flags
-tf.app.flags.DEFINE_boolean('decode_file', True, 'Set to True for decoding sentences in a file.')
+tf.app.flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
 tf.app.flags.DEFINE_boolean('decode_input', False, 'Set to True for interactive decoding.')
 
 FLAGS = tf.app.flags.FLAGS

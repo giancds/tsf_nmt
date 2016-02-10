@@ -80,7 +80,8 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
             _, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
                                                decoder_inputs=decoder_inputs,
                                                target_weights=target_weights,
-                                               bucket_id=bucket_id)
+                                               bucket_id=bucket_id,
+                                               validation_step=False)
 
             currloss = model.current_loss.eval()
             sess.run(model.current_loss.assign(currloss + step_loss))
@@ -170,7 +171,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
                         _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
                                                            decoder_inputs=decoder_inputs, target_weights=target_weights,
-                                                           bucket_id=bucket_id)
+                                                           bucket_id=bucket_id, validation_step=True)
 
                         bucket_loss += eval_loss
 
@@ -209,10 +210,15 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                         model.saver.save(sess, best_model_path, global_step=model.global_step)
 
                     else:
-                        sess.run(model.estop_counter_update_op)
-                        if model.estop_counter.eval() >= estop:
-                            print('\nEARLY STOP!\n')
-                            break
+
+                        # if FLAGS.early_stop_after_epoch is equal to 0, it will monitor from the beginning
+                        if model.epoch.eval() >= FLAGS.early_stop_after_epoch:
+
+                            sess.run(model.estop_counter_update_op)
+
+                            if model.estop_counter.eval() >= estop:
+                                print('\nEARLY STOP!\n')
+                                break
 
                     print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
                     print('early stop patience: %d - max %d\n' % (int(model.estop_counter.eval()), estop))

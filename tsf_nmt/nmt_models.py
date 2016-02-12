@@ -74,6 +74,30 @@ def _decode(target,
             translate=False,
             beam_size=12,
             dtype=tf.float32):
+    """
+
+    Parameters
+    ----------
+    target
+    decoder_cell
+    decoder_initial_state
+    attention_states
+    target_vocab_size
+    output_projection
+    batch_size
+    do_decode
+    input_feeding
+    attention_type
+    content_function
+    output_attention
+    translate
+    beam_size
+    dtype
+
+    Returns
+    -------
+
+    """
     assert attention_type is not None
 
     assert attention_type is 'local' or attention_type is 'global' or attention_type is 'hybrid'
@@ -327,7 +351,9 @@ class Seq2SeqModel(object):
                     self.updates.append(opt.apply_gradients(
                             zip(clipped_gradients, params), global_step=self.global_step))
 
+            # TODO: set a different saver for the best models
             self.saver = tf.train.Saver(tf.all_variables())
+            self.saver_best = tf.train.Saver(tf.all_variables())
 
     def inference(self, source, target, do_decode=False):
         """

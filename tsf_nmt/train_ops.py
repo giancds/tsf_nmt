@@ -83,6 +83,10 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                                                bucket_id=bucket_id,
                                                validation_step=False)
 
+            if numpy.isnan(step_loss) or numpy.isinf(step_loss):
+                print 'NaN detected'
+                break
+
             currloss = model.current_loss.eval()
             sess.run(model.current_loss.assign(currloss + step_loss))
 
@@ -124,9 +128,9 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                 loss = model.avg_loss.eval()
                 ppx = math.exp(loss) if loss < 300 else float('inf')
 
-                if numpy.isnan(loss) or numpy.isinf(loss):
-                    print 'NaN detected'
-                    break
+                # if numpy.isnan(loss) or numpy.isinf(loss):
+                #     print 'NaN detected'
+                #     break
 
                 if ppx > 1000.0:
                     print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx > %.8f - avg. %.2f K target words/sec' %
@@ -207,7 +211,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                         # Save checkpoint
                         print('Saving the best model so far...')
                         best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
-                        model.saver.save(sess, best_model_path, global_step=model.global_step)
+                        model.saver_best.save(sess, best_model_path, global_step=model.global_step)
 
                     else:
 
@@ -429,7 +433,7 @@ def train_lm(FLAGS=None):
 
                         print('Saving the best model so far...')
                         best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
-                        model.saver.save(sess, best_model_path, global_step=model.global_step)
+                        model.saver_best.save(sess, best_model_path, global_step=model.global_step)
                     else:
                         sess.run(model.estop_counter_update_op)
                         if model.estop_counter.eval() >= estop:

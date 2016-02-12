@@ -133,6 +133,7 @@ class LMModel(object):
             self.logits = nn_ops.softmax(logit)
 
         self.saver = tf.train.Saver(tf.all_variables())
+        self.saver_best = tf.train.Saver(tf.all_variables())
 
     @property
     def cost(self):

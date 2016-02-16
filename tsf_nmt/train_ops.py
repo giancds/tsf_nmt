@@ -61,6 +61,8 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
         print("Optimization started...")
         while model.epoch.eval() < FLAGS.max_epochs:
 
+            saved = False
+
             start_time = time.time()
 
             # Choose a bucket according to data distribution. We pick a random number
@@ -93,26 +95,6 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
             # increase the number of seen samples
             sess.run(model.samples_seen_update_op)
             # sess.run(model.current_loss_update_op)
-
-            # update epoch number
-            if model.samples_seen.eval() >= train_total_size:
-                sess.run(model.epoch_update_op)
-                ep = model.epoch.eval()
-                print("Epoch %d finished..." % (ep - 1))
-
-                # Save checkpoint
-                checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
-                model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-
-                if ep >= FLAGS.max_epochs:
-                    break
-
-                print("Epoch %d started..." % ep)
-                sess.run(model.samples_seen_reset_op)
-
-                if FLAGS.start_decay > 0:
-                    if model.epoch.eval() >= FLAGS.start_decay:
-                        sess.run(model.learning_rate_decay_op)
 
             current_step = model.global_step.eval()
 
@@ -150,6 +132,31 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                 # Save checkpoint
                 checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+                saved = True
+
+             # update epoch number
+            if model.samples_seen.eval() >= train_total_size:
+                sess.run(model.epoch_update_op)
+                ep = model.epoch.eval()
+                print("Epoch %d finished..." % (ep - 1))
+
+                # Save checkpoint
+                checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+                model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+                if ep >= FLAGS.max_epochs:
+                    if not saved:
+                        # Save checkpoint
+                        checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+                        model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+                    break
+
+                print("Epoch %d started..." % ep)
+                sess.run(model.samples_seen_reset_op)
+
+                if FLAGS.start_decay > 0:
+                    if model.epoch.eval() >= FLAGS.start_decay:
+                        sess.run(model.learning_rate_decay_op)
 
             if current_step % FLAGS.steps_per_validation == 0:
 
@@ -238,8 +245,8 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
             words_time += (time.time() - start_time)
 
         # # Save checkpoint
-        # checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
-        # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+        checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+        model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
         print("\nTraining finished!!\n")
 
@@ -402,13 +409,13 @@ def train_lm(FLAGS=None):
                 checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
-            # TODO: check validation batches
             if current_step % FLAGS.steps_per_validation == 0:
                 total_valid_cost = 0.0
 
                 valid_batch_size = len(valid_data)
                 valid_inputs, valid_targets, valid_mask, _ = model.get_train_batch(valid_data, batch=valid_batch_size)
 
+                # the op parameter defines if we make a parameter update or not
                 valid_cost, _ = model.train_step(session=sess, lm_inputs=valid_inputs, lm_targets=valid_targets,
                                                  mask=valid_mask, op=tf.no_op())
 

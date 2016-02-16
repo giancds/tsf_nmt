@@ -41,14 +41,13 @@ flags = tf.flags
 flags.DEFINE_float('learning_rate', 0.001, 'Learning rate.')
 flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by this much. Setting it to 1.0 will not affect the learning rate.')
 flags.DEFINE_integer('start_decay', 0, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
-flags.DEFINE_string('optimizer', 'adam',
-                           'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
+flags.DEFINE_string('optimizer', 'adam', 'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
 flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
 flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
 flags.DEFINE_integer('max_len', 100, 'Max size of the beam used for decoding.')
-flags.DEFINE_integer('max_epochs', 12,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
+flags.DEFINE_integer('max_epochs', 30,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
 flags.DEFINE_integer('max_train_data_size', 0, 'Limit on the size of training data (0: no limit).')
 
 # flags related to model architecture
@@ -89,7 +88,7 @@ flags.DEFINE_integer('steps_verbosity', 10, 'How many training steps to do betwe
 # pacience flags (learning_rate decay and early stop)
 flags.DEFINE_integer('lr_rate_patience', 3, 'How many training steps to monitor.')
 flags.DEFINE_integer('early_stop_patience', 20, 'How many training steps to monitor.')
-flags.DEFINE_integer('early_stop_after_epoch', 11, 'Start monitoring early_stop after this epoch.')
+flags.DEFINE_integer('early_stop_after_epoch', 12, 'Start monitoring early_stop after this epoch.')
 
 # decoding/testing flags
 flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
@@ -113,7 +112,7 @@ def main(_):
         # model_path = FLAGS.best_models_dir + FLAGS.model_name + '-best-0'
         model_path = None
         decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en',
-                         model_path=model_path, use_best=False, FLAGS=FLAGS,
+                         model_path=model_path, use_best=True, FLAGS=FLAGS,
                          buckets=_buckets)
 
     else:

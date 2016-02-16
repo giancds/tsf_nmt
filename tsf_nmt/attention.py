@@ -304,24 +304,25 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
             cell_output, new_state = cell(x, states[-1])
             states.append(new_state)  # new_state = dt#
 
-            dt = new_state
+            # dt = new_state
+            dt = cell_output
 
             # Run the attention mechanism.
             if attention_type is 'local':
-                ht_hat = _local_attention(decoder_hidden_state=dt, last_layer_output=cell_output,
+                ht_hat = _local_attention(decoder_hidden_state=dt,
                                           hidden_features=hidden_features, va=va, hidden_attn=hidden,
                                           attention_vec_size=attention_vec_size, attn_length=attn_length,
                                           attn_size=attn_size, batch_size=batch_size, content_function=content_function,
                                           window_size=window_size, dtype=dtype)
 
             elif attention_type is 'global':
-                ht_hat = _global_attention(decoder_hidden_state=dt, last_layer_output=cell_output,
+                ht_hat = _global_attention(decoder_hidden_state=dt,
                                            hidden_features=hidden_features, v=va, hidden_attn=hidden,
                                            attention_vec_size=attention_vec_size, attn_length=attn_length,
                                            content_function=content_function, attn_size=attn_size)
 
             else:  # here we choose the hybrid mechanism
-                ht_hat = _hybrid_attention(decoder_hidden_state=dt, last_layer_output=cell_output,
+                ht_hat = _hybrid_attention(decoder_hidden_state=dt,
                                            hidden_features=hidden_features, va=va, hidden_attn=hidden,
                                            attention_vec_size=attention_vec_size, attn_length=attn_length,
                                            attn_size=attn_size, batch_size=batch_size,
@@ -333,9 +334,7 @@ def _attention_decoder(decoder_inputs, initial_state, attention_states, cell, ba
                 # if we pass a list of tensors, linear will first concatenate them over axis 1
                 output = rnn_cell.linear([cell_output] + [ht_hat], output_size, True)
 
-                if content_function is not VINYALS_KAISER:
-
-                    output = tf.tanh(output)
+                output = tf.tanh(output)
 
             if loop_function is not None:
                 # We do not propagate gradients over the loop function.
@@ -497,24 +496,24 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
             cell_output, new_state = cell(x, states[-1])
             states.append(new_state)  # new_state = dt#
 
-            dt = new_state
+            # dt = new_state
+            dt = cell_output
 
             # Run the attention mechanism.
             if attention_type is 'local':
-                ht_hat = _local_attention(decoder_hidden_state=dt, last_layer_output=cell_output,
-                                          hidden_features=hidden_features, va=va, hidden_attn=hidden,
-                                          attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                          attn_size=attn_size, batch_size=batch_size, content_function=content_function,
-                                          window_size=window_size, dtype=dtype)
+                ht_hat = _local_attention(decoder_hidden_state=dt,  hidden_features=hidden_features, va=va,
+                                          hidden_attn=hidden, attention_vec_size=attention_vec_size,
+                                          attn_length=attn_length, attn_size=attn_size, batch_size=batch_size,
+                                          content_function=content_function, window_size=window_size, dtype=dtype)
 
             elif attention_type is 'global':
-                ht_hat = _global_attention(decoder_hidden_state=dt, last_layer_output=cell_output,
-                                           hidden_features=hidden_features, v=va, hidden_attn=hidden,
-                                           attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                           content_function=content_function, attn_size=attn_size)
+                ht_hat = _global_attention(decoder_hidden_state=dt, hidden_features=hidden_features, v=va,
+                                           hidden_attn=hidden, attention_vec_size=attention_vec_size,
+                                           attn_length=attn_length, content_function=content_function,
+                                           attn_size=attn_size)
 
             else:  # here we choose the hybrid mechanism
-                ht_hat = _hybrid_attention(decoder_hidden_state=dt, last_layer_output=cell_output,
+                ht_hat = _hybrid_attention(decoder_hidden_state=dt,
                                            hidden_features=hidden_features, va=va, hidden_attn=hidden,
                                            attention_vec_size=attention_vec_size, attn_length=attn_length,
                                            attn_size=attn_size, batch_size=batch_size,
@@ -526,9 +525,7 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
                 # if we pass a list of tensors, linear will first concatenate them over axis 1
                 output = rnn_cell.linear([cell_output] + [ht_hat], output_size, True)
 
-                if content_function is not VINYALS_KAISER:
-
-                    output = tf.tanh(output)
+                output = tf.tanh(output)
 
             if loop_function is not None:
                 # We do not propagate gradients over the loop function.
@@ -564,12 +561,12 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
     b_path = tf.concat(1, beam_path)
 
     return b_symbols, log_probs, b_path
-    return outputs, states, None
+    # return outputs, states, None
 
 
 def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, attention_vec_size,
                       attn_length, attn_size, batch_size, window_size=10, content_function=VINYALS_KAISER,
-                      last_layer_output=None, dtype=tf.float32):
+                      dtype=tf.float32):
     """
 
     Parameters
@@ -596,13 +593,12 @@ def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, at
                                   hidden_features=hidden_features, va=va, hidden_attn=hidden_attn,
                                   attention_vec_size=attention_vec_size, attn_length=attn_length,
                                   attn_size=attn_size, batch_size=batch_size, content_function=content_function,
-                                  window_size=window_size, last_layer_output=last_layer_output, dtype=dtype)
+                                  window_size=window_size, dtype=dtype)
 
     global_attn = _global_attention(decoder_hidden_state=decoder_hidden_state,
                                     hidden_features=hidden_features, v=va, hidden_attn=hidden_attn,
                                     attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                    content_function=content_function, attn_size=attn_size,
-                                    last_layer_output=last_layer_output, )
+                                    content_function=content_function, attn_size=attn_size)
 
     with vs.variable_scope("FeedbackGate_%d" % 0):
         y = rnn_cell.linear(decoder_hidden_state, attention_vec_size, True)
@@ -620,7 +616,7 @@ def _hybrid_attention(decoder_hidden_state, hidden_features, va, hidden_attn, at
 
 
 def _global_attention(decoder_hidden_state, hidden_features, v, hidden_attn, attention_vec_size, attn_length,
-                      attn_size, content_function=VINYALS_KAISER, last_layer_output=None):
+                      attn_size, content_function=VINYALS_KAISER):
 
     """
     Put global attention masks on hidden using hidden_features and query.
@@ -648,17 +644,13 @@ def _global_attention(decoder_hidden_state, hidden_features, v, hidden_attn, att
 
         if content_function is LUONG_DOT:
 
-            assert last_layer_output is not None
-
-            s = math_ops.reduce_sum((hidden_features * last_layer_output), [2, 3])  # hidden features are h_s
+            s = math_ops.reduce_sum((hidden_features * decoder_hidden_state), [2, 3])  # hidden features are h_s
 
             # a = tf.matmul(last_layer_output, hidden_features)
 
         elif content_function is LUONG_GENERAL:
 
-            assert last_layer_output is not None
-
-            s = math_ops.reduce_sum((last_layer_output * hidden_features), [2, 3])  # hidden features are Wa*h_s
+            s = math_ops.reduce_sum((decoder_hidden_state * hidden_features), [2, 3])  # hidden features are Wa*h_s
 
         else:
 
@@ -681,7 +673,7 @@ def _global_attention(decoder_hidden_state, hidden_features, v, hidden_attn, att
 
 def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, attention_vec_size,
                      attn_length, attn_size, batch_size, window_size=10, content_function=VINYALS_KAISER,
-                     last_layer_output=None, dtype=tf.float32):
+                     dtype=tf.float32):
     """
     Put local attention masks on hidden using hidden_features and query.
 
@@ -715,22 +707,18 @@ def _local_attention(decoder_hidden_state, hidden_features, va, hidden_attn, att
 
         if content_function is LUONG_DOT:
 
-            assert last_layer_output is not None
-
-            s = math_ops.reduce_sum((last_layer_output * hidden_features), [2, 3])
+            s = math_ops.reduce_sum((decoder_hidden_state * hidden_features), [2, 3])
 
         elif content_function is LUONG_GENERAL:
 
-            assert last_layer_output is not None
-
+            # related to the prediction of window center
             ht = rnn_cell.linear([decoder_hidden_state], attention_vec_size, True)
 
-            s = math_ops.reduce_sum((last_layer_output * hidden_features), [2, 3])
+            s = math_ops.reduce_sum((decoder_hidden_state * hidden_features), [2, 3])
 
         else:
 
-            # this code calculate the W2*dt part of the equation - we do this here because we need
-            # to obtain the current hidden states from the decoder
+            # this code calculate the W2*dt part of the equation and also the Wp*ht of the prediction of window center
             linear_trans = rnn_cell.linear([decoder_hidden_state, decoder_hidden_state], attention_vec_size * 2, True)
             y, ht = tf.split(1, 2, linear_trans)
 
@@ -943,28 +931,25 @@ def _attention_decoder_output(decoder_inputs, initial_state, attention_states, c
             states.append(new_state)  # new_state = dt#
             cell_outputs.append(cell_output)
 
-            dt = new_state
-
-            last_layer_output = None
-            if content_function is LUONG_GENERAL or content_function is LUONG_DOT:
-                last_layer_output = cell_output
+            # dt = new_state
+            dt = cell_output
 
             # Run the attention mechanism.
             if attention_type is 'local':  # local attention
-                ctx = _local_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
+                ctx = _local_attention(decoder_hidden_state=dt,
                                        hidden_features=hidden_features, va=va, hidden_attn=hidden,
                                        attention_vec_size=attention_vec_size, attn_length=attn_length,
                                        attn_size=attn_size, batch_size=batch_size, content_function=content_function,
                                        window_size=window_size, dtype=dtype)
 
             elif attention_type is 'global':  # global attention
-                ctx = _global_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
-                                        hidden_features=hidden_features, v=va, hidden_attn=hidden,
-                                        attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                        content_function=content_function, attn_size=attn_size)
+                ctx = _global_attention(decoder_hidden_state=dt, hidden_features=hidden_features, v=va,
+                                        hidden_attn=hidden, attention_vec_size=attention_vec_size,
+                                        attn_length=attn_length, content_function=content_function,
+                                        attn_size=attn_size)
 
             else:  # here we choose the hybrid mechanism
-                ctx = _hybrid_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
+                ctx = _hybrid_attention(decoder_hidden_state=dt,
                                         hidden_features=hidden_features, va=va, hidden_attn=hidden,
                                         attention_vec_size=attention_vec_size, attn_length=attn_length,
                                         attn_size=attn_size, batch_size=batch_size,
@@ -1178,28 +1163,25 @@ def _attention_decoder_output_search(decoder_inputs, initial_state, attention_st
             states.append(new_state)  # new_state = dt#
             cell_outputs.append(cell_output)
 
-            dt = new_state
-
-            last_layer_output = None
-            if content_function is LUONG_GENERAL or content_function is LUONG_DOT:
-                last_layer_output = cell_output
+            # dt = new_state
+            dt = cell_output
 
             # Run the attention mechanism.
             if attention_type is 'local':  # local attention
-                ctx = _local_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
+                ctx = _local_attention(decoder_hidden_state=dt,
                                        hidden_features=hidden_features, va=va, hidden_attn=hidden,
                                        attention_vec_size=attention_vec_size, attn_length=attn_length,
                                        attn_size=attn_size, batch_size=batch_size, content_function=content_function,
                                        window_size=window_size, dtype=dtype)
 
             elif attention_type is 'global':  # global attention
-                ctx = _global_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
-                                        hidden_features=hidden_features, v=va, hidden_attn=hidden,
-                                        attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                        content_function=content_function, attn_size=attn_size)
+                ctx = _global_attention(decoder_hidden_state=dt, hidden_features=hidden_features, v=va,
+                                        hidden_attn=hidden, attention_vec_size=attention_vec_size,
+                                        attn_length=attn_length, content_function=content_function,
+                                        attn_size=attn_size)
 
             else:  # here we choose the hybrid mechanism
-                ctx = _hybrid_attention(decoder_hidden_state=dt, last_layer_output=last_layer_output,
+                ctx = _hybrid_attention(decoder_hidden_state=dt,
                                         hidden_features=hidden_features, va=va, hidden_attn=hidden,
                                         attention_vec_size=attention_vec_size, attn_length=attn_length,
                                         attn_size=attn_size, batch_size=batch_size,

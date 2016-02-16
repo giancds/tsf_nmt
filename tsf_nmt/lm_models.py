@@ -204,6 +204,7 @@ class LMModel(object):
 
     def train_step(self, session, lm_inputs, lm_targets, mask, op=None):
 
+        # the op define if we do a parametyer update or not - when validation, op must be tf.no_op()
         if op is None:
             op = self.train_op
 

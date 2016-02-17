@@ -47,14 +47,14 @@ def _reverse_encoder(source,
 
     initial_state = encoder_cell.zero_state(batch_size=batch_size, dtype=dtype)
 
-    outputs, states = rnn.rnn(encoder_cell, emb_inp,
+    outputs, state = rnn.rnn(encoder_cell, emb_inp,
                               initial_state=initial_state,
                               dtype=dtype,
                               scope='reverse_encoder')
 
     hidden_states = outputs
 
-    decoder_initial_state = states[-1]
+    decoder_initial_state = state
 
     return hidden_states, decoder_initial_state
 
@@ -105,20 +105,38 @@ def _decode(target,
     # decoder with attention
     with tf.name_scope('decoder_with_attention') as scope:
 
-        # run the decoder with attention
-        outputs, states, decoder_states = attention.embedding_attention_decoder(
-            target, decoder_initial_state, attention_states,
-            decoder_cell, batch_size, target_vocab_size,
-            output_size=None, output_projection=output_projection,
-            feed_previous=do_decode, input_feeding=input_feeding,
-            attention_type=attention_type, dtype=dtype,
-            content_function=content_function,
-            output_attention=output_attention,
-            translate=translate, beam_size=beam_size,
-            scope='decoder_with_attention'
-        )
+        if translate:
 
-    return outputs, states, decoder_states
+            b_symbols, log_probs, b_path = attention.embedding_attention_decoder(
+                target, decoder_initial_state, attention_states,
+                decoder_cell, batch_size, target_vocab_size,
+                output_size=None, output_projection=output_projection,
+                feed_previous=do_decode, input_feeding=input_feeding,
+                attention_type=attention_type, dtype=dtype,
+                content_function=content_function,
+                output_attention=output_attention,
+                translate=translate, beam_size=beam_size,
+                scope='decoder_with_attention'
+            )
+
+            return b_symbols, log_probs, b_path
+
+        else:
+
+            # run the decoder with attention
+            outputs, states = attention.embedding_attention_decoder(
+                target, decoder_initial_state, attention_states,
+                decoder_cell, batch_size, target_vocab_size,
+                output_size=None, output_projection=output_projection,
+                feed_previous=do_decode, input_feeding=input_feeding,
+                attention_type=attention_type, dtype=dtype,
+                content_function=content_function,
+                output_attention=output_attention,
+                translate=translate, beam_size=beam_size,
+                scope='decoder_with_attention'
+            )
+
+            return outputs, states
 
 
 class Seq2SeqModel(object):
@@ -245,7 +263,7 @@ class Seq2SeqModel(object):
 
             # If we use sampled softmax, we need an output projection.
             self.output_projection = None
-            softmax_loss_function = None
+            loss_function = None
 
             # Sampled softmax only makes sense if we sample less than vocabulary size.
             if 0 < num_samples < self.target_vocab_size:
@@ -261,7 +279,7 @@ class Seq2SeqModel(object):
                         return tf.nn.sampled_softmax_loss(w_t, b, inputs, labels, num_samples,
                                                           self.target_vocab_size)
 
-                softmax_loss_function = sampled_loss
+                loss_function = sampled_loss
 
             # create the embedding matrix - this must be done in the CPU for now
             with tf.device("/cpu:0"):
@@ -321,7 +339,7 @@ class Seq2SeqModel(object):
                 # context, decoder_initial_state, attention_states
                 self.context, self.decoder_initial_state, self.attention_states = self.encode(self.encoder_inputs, b_size)
 
-                self.outputs, self.scores, _ = _decode(
+                self.outputs, self.scores, self.hypothesis_path = _decode(
                     [self.decoder_inputs[0]], self.decoder_cell, self.decoder_initial_state, self.attention_states,
                     self.target_vocab_size, self.output_projection, batch_size=b_size,
                     attention_type=self.attention_type, content_function=self.content_function, do_decode=True,
@@ -330,11 +348,11 @@ class Seq2SeqModel(object):
                 )
 
             else:
+
                 self.outputs, self.losses = seq2seq.model_with_buckets(
-                        self.encoder_inputs, self.decoder_inputs, targets,
-                        self.target_weights, buckets, self.target_vocab_size,
-                        lambda x, y: seq2seq_f(x, y, False),
-                        softmax_loss_function=softmax_loss_function)
+                    encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
+                    targets=targets, weights=self.target_weights, buckets=buckets,
+                    seq2seq=lambda x, y: seq2seq_f(x, y, False), softmax_loss_function=loss_function)
 
             # Gradients and SGD update operation for training the model.
             params = tf.trainable_variables()
@@ -379,7 +397,7 @@ class Seq2SeqModel(object):
         context, decoder_initial_state, attention_states = self.encode(source, b_size)
 
         # decode target - note that we pass decoder_states as None when training the model
-        outputs, states, decoder_states = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
+        outputs, state = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
                                                   self.target_vocab_size, self.output_projection,
                                                   batch_size=b_size, attention_type=self.attention_type,
                                                   do_decode=do_decode, input_feeding=self.input_feeding,
@@ -387,7 +405,7 @@ class Seq2SeqModel(object):
                                                   output_attention=self.output_attention)
 
         # return the output (logits) and internal states
-        return outputs, states
+        return outputs, state
 
     def encode(self, source, batch_size, translate=False):
 
@@ -599,10 +617,10 @@ class Seq2SeqModel(object):
         input_feed[self.decoder_inputs[0].name] = decoder_inputs[0],
 
         # we select the last element of ret0 to keep as it is a list of hidden_states
-        output_feed = [self.outputs, self.scores]
+        output_feed = [self.outputs, self.scores, self.hypothesis_path]
 
         # outputs will be a list of length beam_size containing the best generated hypothesis
-        outputs, scores = session.run(output_feed, input_feed)
+        outputs, scores, hypothesis_path = session.run(output_feed, input_feed)
 
         sample, sample_score = [], []
         for i in xrange(outputs.shape[0]):
@@ -617,7 +635,7 @@ class Seq2SeqModel(object):
                 idx = len(hypothesis)
 
             hypothesis = hypothesis[0:idx]
-            hyp_score = numpy.sum(hyp_score[0:idx]) / len(hypothesis)
+            hyp_score = hyp_score[idx] / len(hypothesis)
             if normalize:
                 hyp_score /= len(hypothesis)
 

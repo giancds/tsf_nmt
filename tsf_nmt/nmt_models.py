@@ -620,24 +620,45 @@ class Seq2SeqModel(object):
         output_feed = [self.outputs, self.scores, self.hypothesis_path]
 
         # outputs will be a list of length beam_size containing the best generated hypothesis
-        outputs, scores, hypothesis_path = session.run(output_feed, input_feed)
+        symbols, probs, path = session.run(output_feed, input_feed)
+
+        hypotheses = [[]]
+        probabilities = [[]]
+        tempH = []
+        tempS = []
+        for time in xrange(len(symbols)):
+            # if time is 0, we add all the symbols to the temp list
+            c = 0
+            for p in path[time]:
+                tempH.append(hypotheses[p] + [symbols[time][c]])
+                tempS.append(probabilities[p] + [probs[time][c]])
+                c += 1
+            #
+            hypotheses = copy.copy(tempH)
+            probabilities = copy.copy(tempS)
+            tempH = []
+            tempS = []
 
         sample, sample_score = [], []
-        for i in xrange(outputs.shape[0]):
-            # retrieve the rows of each array
-            hypothesis = outputs[i, :].tolist()
-            hyp_score = scores[i, :].tolist()
+
+        for hypothesis, hyp_score in zip(hypotheses, probabilities):
 
             try:
                 # ge the index of the EOS symbol
-                idx = hypothesis.index(data_utils.EOS_ID) - 1
+                idx = hypothesis.index(data_utils.EOS_ID)
             except ValueError:
-                idx = len(hypothesis)
+                idx = len(token_ids)
 
-            hypothesis = hypothesis[0:idx]
-            hyp_score = hyp_score[idx] / len(hypothesis)
+            hyp = hypothesis[0:idx]
+
+            if idx > 0:
+                score = hyp_score[idx-1]
+            else:
+                score = hyp_score[0]
+
+            length = len(hyp)
             if normalize:
-                hyp_score /= len(hypothesis)
+                score /= length
 
             sample.append(hypothesis)
             sample_score.append(hyp_score)

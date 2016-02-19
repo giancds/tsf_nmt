@@ -4,13 +4,14 @@ from __future__ import print_function
 import numpy
 import tensorflow as tf
 import sys
+import time
 from tensorflow.python.platform import gfile
 
 import data_utils
 from build_ops import create_nmt_model
 
 
-def decode_from_file(file_path, model_path=None, use_best=False, get_ids=True, FLAGS=None, buckets=None):
+def decode_from_file(files, model_path=None, use_best=False, get_ids=True, FLAGS=None, buckets=None):
 
     assert FLAGS is not None
     assert buckets is not None
@@ -34,43 +35,57 @@ def decode_from_file(file_path, model_path=None, use_best=False, get_ids=True, F
         src_vocab, _ = data_utils.initialize_vocabulary(source_vocab_file)
         _, rev_tgt_vocab = data_utils.initialize_vocabulary(target_vocab_file)
 
-        sentence_count = 0
+        start_total_time = time.time()
+        total_sentence_count = 0
 
-        # Decode from file.
-        with gfile.GFile(file_path, mode='r') as source:
-            with gfile.GFile(file_path + '.trans', mode='w') as destiny:
-                sentence = source.readline()
+        for file_path in files:
 
-                while sentence:
+            print("Translating file %s\n" % file_path)
 
-                    sentence_count += 1
-                    print("Translating sentence %d ", sentence_count)
+            sentence_count = 0
 
-                    if get_ids:
-
-                        # Get token-ids for the input sentence.
-                        token_ids = data_utils.sentence_to_token_ids(sentence, src_vocab)
-
-                    else:
-
-                         # if sentence is already converted, just split the ids
-                        token_ids = [int(ss) for ss in sentence.strip().split()]
-
-                    # Get output logits for the sentence.
-                    output_hypotheses, output_scores = model.translation_step(sess, token_ids)
-
-                    outputs = output_hypotheses[0]
-
-                    # try:
-                    #     if data_utils.EOS_ID in outputs:
-                    #         outputs = outputs[:outputs.index(data_utils.EOS_ID)]
-                    # except ValueError:
-                    #     pass
-
-                    # Print out sentence corresponding to outputs.
-                    destiny.write(" ".join([rev_tgt_vocab[output] for output in outputs]))
-                    destiny.write("\n")
+            # Decode from file.
+            with gfile.GFile(file_path, mode='r') as source:
+                with gfile.GFile(file_path + '.trans', mode='w') as destiny:
                     sentence = source.readline()
+
+                    start_time = time.time()
+                    while sentence:
+
+                        sentence_count += 1
+                        print("Translating sentence %d ", sentence_count)
+
+                        if get_ids:
+
+                            # Get token-ids for the input sentence.
+                            token_ids = data_utils.sentence_to_token_ids(sentence, src_vocab)
+
+                        else:
+
+                             # if sentence is already converted, just split the ids
+                            token_ids = [int(ss) for ss in sentence.strip().split()]
+
+                        # Get output logits for the sentence.
+                        output_hypotheses, output_scores = model.translation_step(sess, token_ids)
+
+                        outputs = output_hypotheses[0]
+
+                        # Print out sentence corresponding to outputs.
+                        destiny.write(" ".join([rev_tgt_vocab[output] for output in outputs]))
+                        destiny.write("\n")
+                        sentence = source.readline()
+
+                    end_time = time.time() - start_time
+
+                    print("\nDone file %s" % file_path)
+                    print("Avg. %.3f sentences/sec" % (sentence_count / end_time))
+
+            total_sentence_count += sentence_count
+
+        end_total_time = time.time() - start_total_time
+
+        print("\nDone!")
+        print("Avg. %.3f sentences/sec" % (total_sentence_count / end_total_time))
 
 
 def decode_from_stdin(show_all_n_best=False, FLAGS=None, buckets=None):

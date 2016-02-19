@@ -572,12 +572,11 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
                 probs = tf.reshape(probs + log_beam_probs[-1], [-1, beam_size * num_symbols])
 
             best_probs, indices = tf.nn.top_k(probs, beam_size)
-            # indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
-            indices = tf.reshape(indices, [-1, 1])
-            best_probs = tf.reshape(best_probs, [-1, 1])
+            indices = tf.stop_gradient(tf.squeeze(tf.reshape(indices, [-1, 1])))
+            best_probs = tf.stop_gradient(tf.reshape(best_probs, [-1, 1]))
 
-            symbols = indices % num_symbols # Which word in vocabulary.
-            beam_parent = indices // num_symbols # Which hypothesis it came from.
+            symbols = indices % num_symbols  # Which word in vocabulary.
+            beam_parent = indices // num_symbols  # Which hypothesis it came from.
 
             beam_symbols.append(symbols)
             beam_path.append(beam_parent)
@@ -589,9 +588,15 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
             # add the embeddings to the inputs for the next round
             decoder_inputs.append(emb)
 
-    b_symbols = tf.concat(1, beam_symbols)
-    log_probs = tf.concat(1, log_beam_probs)
-    b_path = tf.concat(1, beam_path)
+            # print('')
+
+    b_symbols = tf.concat(0, beam_symbols)
+    log_probs = tf.concat(0, log_beam_probs)
+    b_path = tf.concat(0, beam_path)
+
+    b_symbols = tf.reshape(b_symbols, [-1, beam_size])
+    log_probs = tf.reshape(log_probs, [-1, beam_size])
+    b_path = tf.reshape(b_path, [-1, beam_size])
 
     return b_symbols, log_probs, b_path
 
@@ -1251,12 +1256,11 @@ def _attention_decoder_output_search(decoder_inputs, initial_state, attention_st
                 probs = tf.reshape(probs + log_beam_probs[-1], [-1, beam_size * num_symbols])
 
             best_probs, indices = tf.nn.top_k(probs, beam_size)
-            # indices = tf.squeeze(tf.reshape(indices, [-1, 1]))
-            indices = tf.reshape(indices, [-1, 1])
-            best_probs = tf.reshape(best_probs, [-1, 1])
+            indices = tf.stop_gradient(tf.squeeze(tf.reshape(indices, [-1, 1])))
+            best_probs = tf.stop_gradient(tf.reshape(best_probs, [-1, 1]))
 
-            symbols = indices % num_symbols # Which word in vocabulary.
-            beam_parent = indices // num_symbols # Which hypothesis it came from.
+            symbols = indices % num_symbols  # Which word in vocabulary.
+            beam_parent = indices // num_symbols  # Which hypothesis it came from.
 
             beam_symbols.append(symbols)
             beam_path.append(beam_parent)
@@ -1270,8 +1274,12 @@ def _attention_decoder_output_search(decoder_inputs, initial_state, attention_st
 
             # print('')
 
-    b_symbols = tf.concat(1, beam_symbols)
-    log_probs = tf.concat(1, log_beam_probs)
-    b_path = tf.concat(1, beam_path)
+    b_symbols = tf.concat(0, beam_symbols)
+    log_probs = tf.concat(0, log_beam_probs)
+    b_path = tf.concat(0, beam_path)
+
+    b_symbols = tf.reshape(b_symbols, [-1, beam_size])
+    log_probs = tf.reshape(log_probs, [-1, beam_size])
+    b_path = tf.reshape(b_path, [-1, beam_size])
 
     return b_symbols, log_probs, b_path

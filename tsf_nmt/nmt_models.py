@@ -27,7 +27,6 @@ def _reverse_encoder(source,
                     src_embedding,
                     encoder_cell,
                     batch_size,
-                    device="/cpu:0",
                     dtype=tf.float32):
     """
 
@@ -44,7 +43,7 @@ def _reverse_encoder(source,
 
     """
     # get the embeddings
-    with ops.device(device):
+    with ops.device("/cpu:0"):
         emb_inp = [embedding_ops.embedding_lookup(src_embedding, s) for s in source]
 
     initial_state = encoder_cell.zero_state(batch_size=batch_size, dtype=dtype)
@@ -75,7 +74,6 @@ def _decode(target,
             target_vocab_size,
             output_projection,
             batch_size,
-            device,
             do_decode=False,
             input_feeding=False,
             attention_type=None,
@@ -126,7 +124,7 @@ def _decode(target,
                 content_function=content_function,
                 output_attention=output_attention,
                 translate=translate, beam_size=beam_size,
-                scope='decoder_with_attention', device=device
+                scope='decoder_with_attention'
             )
 
             return b_symbols, log_probs, b_path
@@ -143,7 +141,7 @@ def _decode(target,
                 content_function=content_function,
                 output_attention=output_attention,
                 translate=translate, beam_size=beam_size,
-                scope='decoder_with_attention', device=device
+                scope='decoder_with_attention'
             )
 
             return outputs, states
@@ -186,7 +184,7 @@ class Seq2SeqModel(object):
                  num_samples=512,
                  forward_only=False,
                  max_len=100,
-                 gpu_only=False,
+                 cpu_only=False,
                  output_attention=False,
                  early_stop_patience=0,
                  beam_size=12,
@@ -212,12 +210,12 @@ class Seq2SeqModel(object):
           num_samples: number of samples for sampled softmax.
           forward_only: if set, we do not construct the backward pass in the model.
         """
-        if gpu_only:
-            self.device = "/gpu:0"
+        if cpu_only:
+            device = "/cpu:0"
         else:
-            self.device = "/cpu:0"
+            device = "/gpu:0"
 
-        with tf.device(self.device):
+        with tf.device(device):
 
             self.source_vocab_size = source_vocab_size
             self.target_vocab_size = target_vocab_size
@@ -277,7 +275,7 @@ class Seq2SeqModel(object):
 
             # Sampled softmax only makes sense if we sample less than vocabulary size.
             if 0 < num_samples < self.target_vocab_size:
-                with tf.device(self.device):
+                with tf.device("/cpu:0"):
                     w = tf.get_variable("proj_w", [decoder_size, self.target_vocab_size])
                     w_t = tf.transpose(w)
                     b = tf.get_variable("proj_b", [self.target_vocab_size])
@@ -292,7 +290,7 @@ class Seq2SeqModel(object):
                 loss_function = sampled_loss
 
             # create the embedding matrix - this must be done in the CPU for now
-            with tf.device(self.device):
+            with tf.device("/cpu:0"):
                 self.src_embedding = tf.Variable(
                         tf.truncated_normal(
                                 [source_vocab_size, source_proj_size], stddev=0.01
@@ -354,7 +352,7 @@ class Seq2SeqModel(object):
                     self.target_vocab_size, self.output_projection, batch_size=b_size,
                     attention_type=self.attention_type, content_function=self.content_function, do_decode=True,
                     input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
-                    translate=forward_only, beam_size=beam_size, device=self.device
+                    translate=forward_only, beam_size=beam_size
                 )
 
             else:
@@ -418,13 +416,12 @@ class Seq2SeqModel(object):
         context, decoder_initial_state, attention_states = self.encode(source, b_size)
 
         # decode target - note that we pass decoder_states as None when training the model
-        outputs, state = _decode(
-            target, self.decoder_cell, decoder_initial_state, attention_states,
-            self.target_vocab_size, self.output_projection,
-            batch_size=b_size, attention_type=self.attention_type,
-            do_decode=do_decode, input_feeding=self.input_feeding,
-            content_function=self.content_function, dtype=self.dtype,
-            output_attention=self.output_attention, device=self.device)
+        outputs, state = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
+                                                  self.target_vocab_size, self.output_projection,
+                                                  batch_size=b_size, attention_type=self.attention_type,
+                                                  do_decode=do_decode, input_feeding=self.input_feeding,
+                                                  content_function=self.content_function, dtype=self.dtype,
+                                                  output_attention=self.output_attention)
 
         # return the output (logits) and internal states
         return outputs, state
@@ -438,7 +435,7 @@ class Seq2SeqModel(object):
                 scope.reuse_variables()
             context, decoder_initial_state = _reverse_encoder(
                     source, self.src_embedding, self.encoder_cell,
-                    batch_size, device=self.device, dtype=self.dtype)
+                    batch_size, dtype=self.dtype)
 
             # First calculate a concatenation of encoder outputs to put attention on.
             top_states = [

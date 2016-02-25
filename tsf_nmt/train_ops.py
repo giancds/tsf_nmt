@@ -24,7 +24,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
     # summary_op = tf.merge_all_summaries()
 
-    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as sess:
 
         nan_detected = False
 

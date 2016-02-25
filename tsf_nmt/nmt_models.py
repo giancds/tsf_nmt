@@ -55,7 +55,14 @@ def _reverse_encoder(source,
 
     hidden_states = outputs
 
-    decoder_initial_state = state
+    tf_version = pkg_resources.get_distribution("tensorflow").version
+
+    if tf_version == '0.6.0':
+
+        decoder_initial_state = state[-1]
+    else:
+
+        decoder_initial_state = state
 
     return hidden_states, decoder_initial_state
 
@@ -350,10 +357,21 @@ class Seq2SeqModel(object):
 
             else:
 
-                self.outputs, self.losses = seq2seq.model_with_buckets(
-                    encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
-                    targets=targets, weights=self.target_weights, buckets=buckets,
-                    seq2seq=lambda x, y: seq2seq_f(x, y, False), softmax_loss_function=loss_function)
+                tf_version = pkg_resources.get_distribution("tensorflow").version
+
+                if tf_version == '0.6.0':
+
+                    self.outputs, self.losses = seq2seq.model_with_buckets(
+                        encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
+                        targets=targets, weights=self.target_weights, buckets=buckets,
+                        num_decoder_symbols=self.target_vocab_size,
+                        seq2seq=lambda x, y: seq2seq_f(x, y, False), softmax_loss_function=loss_function)
+
+                else:
+                     self.outputs, self.losses = seq2seq.model_with_buckets(
+                        encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
+                        targets=targets, weights=self.target_weights, buckets=buckets,
+                        seq2seq=lambda x, y: seq2seq_f(x, y, False), softmax_loss_function=loss_function)
 
             # Gradients and SGD update operation for training the model.
             params = tf.trainable_variables()

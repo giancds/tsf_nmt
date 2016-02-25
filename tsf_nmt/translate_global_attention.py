@@ -50,6 +50,8 @@ flags.DEFINE_integer('max_len', 100, 'Max size of the beam used for decoding.')
 flags.DEFINE_integer('max_epochs', 30,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
 flags.DEFINE_integer('max_train_data_size', 0, 'Limit on the size of training data (0: no limit).')
 
+flags.DEFINE_boolean('gpu_only', True, 'Whether or not to use GPU only.')
+
 # flags related to model architecture
 flags.DEFINE_string('model', 'seq2seq', 'one of these models: seq2seq')
 flags.DEFINE_string('attention_type', 'global', 'Which type of attention to use. One of local, global and hybrid.')
@@ -57,8 +59,8 @@ flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of conte
 flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
 flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
 flags.DEFINE_boolean('output_attention', True, 'Whether to pay attention on the decoder outputs. Default to False.')
-flags.DEFINE_integer('proj_size', 500, 'Size of words projection.')
-flags.DEFINE_integer('hidden_size', 500, 'Size of each layer.')
+flags.DEFINE_integer('proj_size', 300, 'Size of words projection.')
+flags.DEFINE_integer('hidden_size', 300, 'Size of each layer.')
 flags.DEFINE_integer('num_layers', 1, 'Number of layers in each component of the model.')
 
 flags.DEFINE_float('dropout', 0.0, 'Dropout rate. When the value is 0.0 dropout is turned off. Optimal should be 0.2 as indicated by Zaremba et al. (2014)')
@@ -71,7 +73,8 @@ flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm1_adam.ckpt',
                            'Model name')
 flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm1_adam/', 'Train directory')
+# flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm1_adam/', 'Train directory')
+flags.DEFINE_string('train_dir', '/home/gian/', 'Train directory')
 flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')

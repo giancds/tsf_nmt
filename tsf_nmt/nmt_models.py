@@ -10,6 +10,7 @@
 import copy
 import random
 import numpy
+import pkg_resources
 import tensorflow as tf
 
 from tensorflow.models.rnn import seq2seq, rnn

@@ -2,9 +2,6 @@
 from __future__ import division
 from __future__ import print_function
 import tensorflow as tf
-import copy
-import data_utils
-import numpy
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops, embedding_ops, math_ops, nn_ops
 from tensorflow.models.rnn import rnn_cell
@@ -981,27 +978,28 @@ def _attention_decoder_output(decoder_inputs, initial_state, attention_states, c
 
             # Run the attention mechanism.
             if attention_type is 'local':  # local attention
-                ht_hat = _local_attention(decoder_hidden_state=dt,
-                                       hidden_features=hidden_features, va=va, hidden_attn=hidden,
-                                       attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                       attn_size=attn_size, batch_size=batch_size, content_function=content_function,
-                                       window_size=window_size, dtype=dtype)
+                ht_hat = _local_attention(
+                    decoder_hidden_state=dt, hidden_features=hidden_features, va=va, hidden_attn=hidden,
+                    attention_vec_size=attention_vec_size, attn_length=attn_length, attn_size=attn_size,
+                    batch_size=batch_size, content_function=content_function, window_size=window_size,
+                    dtype=dtype
+                )
 
             elif attention_type is 'global':  # global attention
-                ht_hat = _global_attention(decoder_hidden_state=dt, hidden_features=hidden_features, v=va,
-                                        hidden_attn=hidden, attention_vec_size=attention_vec_size,
-                                        attn_length=attn_length, content_function=content_function,
-                                        attn_size=attn_size)
+                ht_hat = _global_attention(
+                    decoder_hidden_state=dt, hidden_features=hidden_features, v=va,
+                    hidden_attn=hidden, attention_vec_size=attention_vec_size,
+                    attn_length=attn_length, content_function=content_function,
+                    attn_size=attn_size
+                )
 
             else:  # here we choose the hybrid mechanism
-                ht_hat = _hybrid_attention(decoder_hidden_state=dt,
-                                        hidden_features=hidden_features, va=va, hidden_attn=hidden,
-                                        attention_vec_size=attention_vec_size, attn_length=attn_length,
-                                        attn_size=attn_size, batch_size=batch_size,
-                                        content_function=content_function, window_size=window_size,
-                                        dtype=dtype)
-
-            # if content_function is LUONG_GENERAL or content_function is LUONG_DOT:
+                ht_hat = _hybrid_attention(
+                    decoder_hidden_state=dt, hidden_features=hidden_features, va=va, hidden_attn=hidden,
+                    attention_vec_size=attention_vec_size, attn_length=attn_length, attn_size=attn_size,
+                    batch_size=batch_size, content_function=content_function, window_size=window_size,
+                    dtype=dtype
+                )
 
             with vs.variable_scope("AttnOutputProjection"):
 
@@ -1116,7 +1114,7 @@ def _attention_decoder_output_search(decoder_inputs, initial_state, attention_st
             The dtype to use for the RNN initial state (default: tf.float32).
 
     scope:
-            VariableScope for the created subgraph; default: "attention_decoder".
+            VariableScope for the created sub-graph; default: "attention_decoder".
 
     Returns
     -------

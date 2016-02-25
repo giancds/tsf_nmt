@@ -26,8 +26,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
 
-        finished = False
-        model = None
+        nan_detected = False
 
         # Create model.
         print('Creating layers.')
@@ -61,210 +60,209 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
         words_time = 0.0
         n_target_words = 0
 
-        while not finished:
+        print("Optimization started...")
+        while model.epoch.eval() < FLAGS.max_epochs:
 
-            print("Optimization started...")
-            while model.epoch.eval() < FLAGS.max_epochs:
+            saved = False
 
-                saved = False
+            start_time = time.time()
 
-                start_time = time.time()
+            # Choose a bucket according to data distribution. We pick a random number
+            # in [0, 1] and use the corresponding interval in train_buckets_scale.
+            random_number_01 = numpy.random.random_sample()
+            bucket_id = min([i for i in xrange(len(train_buckets_scale))
+                             if train_buckets_scale[i] > random_number_01])
 
-                # Choose a bucket according to data distribution. We pick a random number
-                # in [0, 1] and use the corresponding interval in train_buckets_scale.
-                random_number_01 = numpy.random.random_sample()
-                bucket_id = min([i for i in xrange(len(train_buckets_scale))
-                                 if train_buckets_scale[i] > random_number_01])
+            # Get a batch and make a step.
+            encoder_inputs, decoder_inputs, target_weights, n_words = model.get_train_batch(
+                train_set, bucket_id
+            )
 
-                # Get a batch and make a step.
-                encoder_inputs, decoder_inputs, target_weights, n_words = model.get_train_batch(
-                        train_set, bucket_id
-                )
+            n_target_words += n_words
 
-                n_target_words += n_words
+            # session, encoder_inputs, decoder_inputs, target_weights, bucket_id
+            _, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+                                               decoder_inputs=decoder_inputs,
+                                               target_weights=target_weights,
+                                               bucket_id=bucket_id,
+                                               validation_step=False)
+            # step_loss = numpy.nan
 
-                # session, encoder_inputs, decoder_inputs, target_weights, bucket_id
-                _, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
-                                                   decoder_inputs=decoder_inputs,
-                                                   target_weights=target_weights,
-                                                   bucket_id=bucket_id,
-                                                   validation_step=False)
-                # step_loss = numpy.nan
+            if numpy.isnan(step_loss) or numpy.isinf(step_loss):
+                print('\nNaN detected\n')
+                nan_detected = True
 
-                if numpy.isnan(step_loss) or numpy.isinf(step_loss):
-                    print '\nNaN detected\n'
-                    finished = False
+                # last_checkpoints = model.saver.last_checkpoints
+                #
+                # if len(last_checkpoints)  > 3:
+                #     old_model = last_checkpoints[-3]
+                # else:
+                #     old_model = last_checkpoints[0]
+                #
+                # print('Reading model parameters from %s\n' % old_model)
+                # model.saver.restore(sess, old_model)
+                #
+                # print('\nReturning to optimization...\n')
+                #
+                break
 
-                    last_checkpoints = model.saver.last_checkpoints
+            currloss = model.current_loss.eval()
+            sess.run(model.current_loss.assign(currloss + step_loss))
 
-                    if len(last_checkpoints)  > 3:
-                        old_model = last_checkpoints[-3]
-                    else:
-                        old_model = last_checkpoints[0]
+            # increase the number of seen samples
+            sess.run(model.samples_seen_update_op)
+            # sess.run(model.current_loss_update_op)
 
-                    print('Reading model parameters from %s\n' % old_model)
-                    model.saver.restore(sess, old_model)
+            current_step = model.global_step.eval()
 
-                    print('\nReturning to optimization...\n')
+            if current_step % FLAGS.steps_verbosity == 0:
 
+                closs = model.current_loss.eval()
+                gstep = model.global_step.eval()
+                avgloss = closs / gstep
+                sess.run(model.avg_loss.assign(avgloss))
+
+                target_words_speed = n_target_words / words_time
+
+                loss = model.avg_loss.eval()
+                ppx = math.exp(loss) if loss < 300 else float('inf')
+
+                # if numpy.isnan(loss) or numpy.isinf(loss):
+                #     print 'NaN detected'
+                #     break
+
+                if ppx > 1000.0:
+                    print(
+                    'epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx > %.8f - avg. %.2f K target words/sec' %
+                    (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
+                     step_time, loss, 1000.0, (target_words_speed / 1000.0)))
+                else:
+                    print(
+                    'epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx %.8f - avg. %.2f K target words/sec' %
+                    (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
+                     step_time, loss, ppx, (target_words_speed / 1000.0)))
+
+                n_target_words = 0
+                step_time = 0.0
+                words_time = 0.0
+
+            # Once in a while, we save checkpoint, print statistics, and run evals.
+            if current_step % FLAGS.steps_per_checkpoint == 0:
+                # Save checkpoint
+                checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+                model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+                saved = True
+
+                # update epoch number
+            if model.samples_seen.eval() >= train_total_size:
+                sess.run(model.epoch_update_op)
+                ep = model.epoch.eval()
+                print("Epoch %d finished..." % (ep - 1))
+
+                # Save checkpoint
+                checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+                model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+                if ep >= FLAGS.max_epochs:
+                    if not saved:
+                        # Save checkpoint
+                        checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
+                        model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+                    finished = True
                     break
 
-                currloss = model.current_loss.eval()
-                sess.run(model.current_loss.assign(currloss + step_loss))
+                print("Epoch %d started..." % ep)
+                sess.run(model.samples_seen_reset_op)
 
-                # increase the number of seen samples
-                sess.run(model.samples_seen_update_op)
-                # sess.run(model.current_loss_update_op)
+                if FLAGS.start_decay > 0:
+                    if model.epoch.eval() >= FLAGS.start_decay:
+                        sess.run(model.learning_rate_decay_op)
 
-                current_step = model.global_step.eval()
+            if current_step % FLAGS.steps_per_validation == 0:
 
-                if current_step % FLAGS.steps_verbosity == 0:
+                if FLAGS.dropout > 0.0:
+                    _turn_dropout(model=model, rate=0.0)
 
-                    closs = model.current_loss.eval()
-                    gstep = model.global_step.eval()
-                    avgloss = closs / gstep
-                    sess.run(model.avg_loss.assign(avgloss))
+                total_eval_loss = 0.0
+                total_ppx = 0.0
 
-                    target_words_speed = n_target_words / words_time
+                print('\n')
 
-                    loss = model.avg_loss.eval()
-                    ppx = math.exp(loss) if loss < 300 else float('inf')
+                # Run evals on development set and print their perplexity.
+                for bucket_id in xrange(len(buckets)):
 
-                    # if numpy.isnan(loss) or numpy.isinf(loss):
-                    #     print 'NaN detected'
-                    #     break
+                    n_steps = len(dev_set[bucket_id]) / model.batch_size
 
-                    if ppx > 1000.0:
-                        print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx > %.8f - avg. %.2f K target words/sec' %
-                              (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
-                               step_time, loss, 1000.0, (target_words_speed / 1000.0)))
-                    else:
-                        print('epoch %d gl.step %d lr.rate %.4f steps-time %.2f avg.loss %.8f avg.ppx %.8f - avg. %.2f K target words/sec' %
-                              (model.epoch.eval(), model.global_step.eval(), model.learning_rate.eval(),
-                               step_time, loss, ppx, (target_words_speed / 1000.0)))
+                    bucket_loss = 0.0
 
-                    n_target_words = 0
-                    step_time = 0.0
-                    words_time = 0.0
+                    for _ in xrange(n_steps):
+                        encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set,
+                                                                                                  bucket_id)
 
-                # Once in a while, we save checkpoint, print statistics, and run evals.
-                if current_step % FLAGS.steps_per_checkpoint == 0:
-                    # Save checkpoint
-                    checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
-                    model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-                    saved = True
+                        _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+                                                           decoder_inputs=decoder_inputs, target_weights=target_weights,
+                                                           bucket_id=bucket_id, validation_step=True)
 
-                 # update epoch number
-                if model.samples_seen.eval() >= train_total_size:
-                    sess.run(model.epoch_update_op)
-                    ep = model.epoch.eval()
-                    print("Epoch %d finished..." % (ep - 1))
+                        bucket_loss += eval_loss
 
-                    # Save checkpoint
-                    checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
-                    model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+                    bucket_avg_loss = bucket_loss / n_steps
+                    total_eval_loss += bucket_avg_loss
 
-                    if ep >= FLAGS.max_epochs:
-                        if not saved:
-                            # Save checkpoint
-                            checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
-                            model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-                        finished = True
-                        break
+                    eval_ppx = math.exp(bucket_avg_loss) if eval_loss < 300 else float('inf')
+                    total_ppx += eval_ppx
+                    print('  eval: bucket %d perplexity %.4f' % (bucket_id, eval_ppx))
 
-                    print("Epoch %d started..." % ep)
-                    sess.run(model.samples_seen_reset_op)
+                avg_eval_loss = total_eval_loss / len(buckets)
+                avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
 
-                    if FLAGS.start_decay > 0:
-                        if model.epoch.eval() >= FLAGS.start_decay:
-                            sess.run(model.learning_rate_decay_op)
+                if avg_ppx > 1000.0:
+                    print('\n  eval: averaged perplexity > 1000.0')
+                else:
+                    print('\n  eval: averaged perplexity %.8f' % avg_ppx)
+                print('  eval: averaged loss %.8f\n' % avg_eval_loss)
 
-                if current_step % FLAGS.steps_per_validation == 0:
+                sys.stdout.flush()
 
-                    if FLAGS.dropout > 0.0:
-                        _turn_dropout(model=model, rate=0.0)
+                estop = FLAGS.early_stop_patience
 
-                    total_eval_loss = 0.0
-                    total_ppx = 0.0
+                if FLAGS.dropout > 0.0:
+                    _turn_dropout(model=model, rate=FLAGS.dropout)
 
-                    print('\n')
+                # check early stop - if early stop patience is greater than 0, test it
+                if estop > 0:
 
-                    # Run evals on development set and print their perplexity.
-                    for bucket_id in xrange(len(buckets)):
-
-                        n_steps = len(dev_set[bucket_id]) / model.batch_size
-
-                        bucket_loss = 0.0
-
-                        for _ in xrange(n_steps):
-
-                            encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set,
-                                                                                                      bucket_id)
-
-                            _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
-                                                               decoder_inputs=decoder_inputs, target_weights=target_weights,
-                                                               bucket_id=bucket_id, validation_step=True)
-
-                            bucket_loss += eval_loss
-
-                        bucket_avg_loss = bucket_loss / n_steps
-                        total_eval_loss += bucket_avg_loss
-
-                        eval_ppx = math.exp(bucket_avg_loss) if eval_loss < 300 else float('inf')
-                        total_ppx += eval_ppx
-                        print('  eval: bucket %d perplexity %.4f' % (bucket_id, eval_ppx))
-
-                    avg_eval_loss = total_eval_loss / len(buckets)
-                    avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
-
-                    if avg_ppx > 1000.0:
-                        print('\n  eval: averaged perplexity > 1000.0')
-                    else:
-                        print('\n  eval: averaged perplexity %.8f' % avg_ppx)
-                    print('  eval: averaged loss %.8f\n' % avg_eval_loss)
-
-                    sys.stdout.flush()
-
-                    estop = FLAGS.early_stop_patience
-
-                    if FLAGS.dropout > 0.0:
-                        _turn_dropout(model=model, rate=FLAGS.dropout)
-
-                    # check early stop - if early stop patience is greater than 0, test it
-                    if estop > 0:
-
-                        if avg_eval_loss < model.best_eval_loss.eval():
-                            sess.run(model.best_eval_loss.assign(avg_eval_loss))
-                            sess.run(model.estop_counter_reset_op)
-                            # Save checkpoint
-                            print('Saving the best model so far...')
-                            best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
-                            model.saver_best.save(sess, best_model_path, global_step=model.global_step)
-
-                        else:
-
-                            # if FLAGS.early_stop_after_epoch is equal to 0, it will monitor from the beginning
-                            if model.epoch.eval() >= FLAGS.early_stop_after_epoch:
-
-                                sess.run(model.estop_counter_update_op)
-
-                                if model.estop_counter.eval() >= estop:
-                                    print('\nEARLY STOP!\n')
-                                    finished = True
-                                    break
-
-                        print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
-                        print('early stop patience: %d - max %d\n' % (int(model.estop_counter.eval()), estop))
+                    if avg_eval_loss < model.best_eval_loss.eval():
+                        sess.run(model.best_eval_loss.assign(avg_eval_loss))
+                        sess.run(model.estop_counter_reset_op)
+                        # Save checkpoint
+                        print('Saving the best model so far...')
+                        best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
+                        model.saver_best.save(sess, best_model_path, global_step=model.global_step)
 
                     else:
 
-                        if avg_eval_loss < model.best_eval_loss.eval():
-                            sess.run(model.best_eval_loss.assign(avg_eval_loss))
+                        # if FLAGS.early_stop_after_epoch is equal to 0, it will monitor from the beginning
+                        if model.epoch.eval() >= FLAGS.early_stop_after_epoch:
 
-                        print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
+                            sess.run(model.estop_counter_update_op)
 
-                step_time += (time.time() - start_time) / FLAGS.steps_verbosity
-                words_time += (time.time() - start_time)
+                            if model.estop_counter.eval() >= estop:
+                                print('\nEARLY STOP!\n')
+                                finished = True
+                                break
+
+                    print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
+                    print('early stop patience: %d - max %d\n' % (int(model.estop_counter.eval()), estop))
+
+                else:
+
+                    if avg_eval_loss < model.best_eval_loss.eval():
+                        sess.run(model.best_eval_loss.assign(avg_eval_loss))
+
+                    print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
+
+            step_time += (time.time() - start_time) / FLAGS.steps_verbosity
+            words_time += (time.time() - start_time)
 
         # # Save checkpoint
         checkpoint_path = os.path.join(FLAGS.train_dir, FLAGS.model_name)
@@ -272,49 +270,51 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
         print("\nTraining finished!!\n")
 
-        print("Final validation:")
+        if not nan_detected:
 
-        total_eval_loss = 0.0
-        total_ppx = 0.0
+            print("Final validation:")
 
-        print('\n')
+            total_eval_loss = 0.0
+            total_ppx = 0.0
 
-        # Run evals on development set and print their perplexity.
-        for bucket_id in xrange(len(buckets)):
+            print('\n')
 
-            n_steps = len(dev_set[bucket_id]) / model.batch_size
+            # Run evals on development set and print their perplexity.
+            for bucket_id in xrange(len(buckets)):
 
-            bucket_loss = 0.0
+                n_steps = len(dev_set[bucket_id]) / model.batch_size
 
-            for _ in xrange(n_steps):
-                encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set,
-                                                                                          bucket_id)
+                bucket_loss = 0.0
 
-                _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
-                                                   decoder_inputs=decoder_inputs, target_weights=target_weights,
-                                                   bucket_id=bucket_id)
+                for _ in xrange(n_steps):
+                    encoder_inputs, decoder_inputs, target_weights, _ = model.get_train_batch(dev_set,
+                                                                                              bucket_id)
 
-                bucket_loss += eval_loss
+                    _, eval_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+                                                       decoder_inputs=decoder_inputs, target_weights=target_weights,
+                                                       bucket_id=bucket_id)
 
-            bucket_avg_loss = bucket_loss / n_steps
-            total_eval_loss += bucket_avg_loss
+                    bucket_loss += eval_loss
 
-            eval_ppx = math.exp(bucket_avg_loss) if eval_loss < 300 else float('inf')
-            total_ppx += eval_ppx
-            print('  eval: bucket %d perplexity %.4f' % (bucket_id, eval_ppx))
+                bucket_avg_loss = bucket_loss / n_steps
+                total_eval_loss += bucket_avg_loss
 
-        avg_eval_loss = total_eval_loss / len(buckets)
-        avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
+                eval_ppx = math.exp(bucket_avg_loss) if eval_loss < 300 else float('inf')
+                total_ppx += eval_ppx
+                print('  eval: bucket %d perplexity %.4f' % (bucket_id, eval_ppx))
 
-        if avg_ppx > 1000.0:
-            print('\n  eval: averaged perplexity > 1000.0')
-        else:
-            print('\n  eval: averaged perplexity %.8f' % avg_ppx)
-        print('  eval: averaged loss %.8f\n' % avg_eval_loss)
+            avg_eval_loss = total_eval_loss / len(buckets)
+            avg_ppx = math.exp(avg_eval_loss) if avg_eval_loss < 300 else float('inf')
 
-        print('\n   best valid. loss during training: %.8f' % model.best_eval_loss.eval())
+            if avg_ppx > 1000.0:
+                print('\n  eval: averaged perplexity > 1000.0')
+            else:
+                print('\n  eval: averaged perplexity %.8f' % avg_ppx)
+            print('  eval: averaged loss %.8f\n' % avg_eval_loss)
 
-        sys.stdout.flush()
+            print('\n   best valid. loss during training: %.8f' % model.best_eval_loss.eval())
+
+            sys.stdout.flush()
 
 
 # TODO: there is a better way of turning dropout off during validation? - this is a little bit "hacky"

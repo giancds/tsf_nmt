@@ -180,8 +180,8 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
             if current_step % FLAGS.steps_per_validation == 0:
 
-                if FLAGS.dropout > 0.0:
-                    _turn_dropout(model=model, rate=0.0)
+                # if FLAGS.dropout > 0.0:
+                #     _turn_dropout(model=model, rate=0.0)
 
                 total_eval_loss = 0.0
                 total_ppx = 0.0
@@ -225,8 +225,8 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
                 estop = FLAGS.early_stop_patience
 
-                if FLAGS.dropout > 0.0:
-                    _turn_dropout(model=model, rate=FLAGS.dropout)
+                # if FLAGS.dropout > 0.0:
+                #     _turn_dropout(model=model, rate=FLAGS.dropout)
 
                 # check early stop - if early stop patience is greater than 0, test it
                 if estop > 0:
@@ -254,12 +254,12 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                     print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
                     print('early stop patience: %d - max %d\n' % (int(model.estop_counter.eval()), estop))
 
-                else:
-
-                    if avg_eval_loss < model.best_eval_loss.eval():
-                        sess.run(model.best_eval_loss.assign(avg_eval_loss))
-
-                    print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
+                # else:
+                #
+                #     if avg_eval_loss < model.best_eval_loss.eval():
+                #         sess.run(model.best_eval_loss.assign(avg_eval_loss))
+                #
+                #     print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
 
             step_time += (time.time() - start_time) / FLAGS.steps_verbosity
             words_time += (time.time() - start_time)

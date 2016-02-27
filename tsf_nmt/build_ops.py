@@ -25,7 +25,7 @@ def get_optimizer(name='sgd', lr_rate=0.1, decay=0.9):
     elif name is 'adagrad':
         optimizer = tf.train.AdagradOptimizer(lr_rate)
     elif name is 'adam':
-        optimizer = tf.train.AdamOptimizer(lr_rate)
+        optimizer = tf.train.AdamOptimizer(lr_rate, epsilon=1e-5)
     elif name is 'rmsprop':
         optimizer = tf.train.RMSPropOptimizer(lr_rate, decay)
     else:
@@ -49,10 +49,10 @@ def build_nmt_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size
         decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size)
     decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size)
 
-    if dropout > 0.0:  # if dropout is 0.0, it is turned off
-        encoder_cell = cells.DropoutWrapper(encoder_cell, output_keep_prob=1.0-dropout)
-        decoder_cell0 = cells.DropoutWrapper(decoder_cell0, output_keep_prob=1.0-dropout)
-        decoder_cell1 = cells.DropoutWrapper(decoder_cell1, output_keep_prob=1.0-dropout)
+    # if dropout > 0.0:  # if dropout is 0.0, it is turned off
+    encoder_cell = rnn_cell.DropoutWrapper(encoder_cell, output_keep_prob=1.0 - dropout)
+    decoder_cell0 = rnn_cell.DropoutWrapper(decoder_cell0, output_keep_prob=1.0 - dropout)
+    decoder_cell1 = rnn_cell.DropoutWrapper(decoder_cell1, output_keep_prob=1.0 - dropout)
 
     encoder_rnncell = rnn_cell.MultiRNNCell([encoder_cell] * num_layers_encoder)
     decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell0] + [decoder_cell1] * (num_layers_decoder - 1))
@@ -73,8 +73,8 @@ def build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=True, dr
         lm_cell1 = cell_class(num_units=hidden_size, input_size=hidden_size)
 
         if dropout > 0.0:  # if dropout is 0.0, it is turned off
-            lm_cell0 = cells.DropoutWrapper(lm_cell0, output_keep_prob=1.0-dropout)
-            lm_cell1 = cells.DropoutWrapper(lm_cell1, output_keep_prob=1.0-dropout)
+            lm_cell0 = rnn_cell.DropoutWrapper(lm_cell0, output_keep_prob=1.0-dropout)
+            lm_cell1 = rnn_cell.DropoutWrapper(lm_cell1, output_keep_prob=1.0-dropout)
 
         lm_rnncell = rnn_cell.MultiRNNCell([lm_cell0] + [lm_cell1] * num_layers)
     else:
@@ -82,7 +82,7 @@ def build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=True, dr
         lm_cell0 = cell_class(num_units=hidden_size, input_size=proj_size)
 
         if dropout > 0.0:  # if dropout is 0.0, it is turned off
-            lm_cell0 = cells.DropoutWrapper(lm_cell0, output_keep_prob=1.0-dropout)
+            lm_cell0 = rnn_cell.DropoutWrapper(lm_cell0, output_keep_prob=1.0-dropout)
 
         lm_rnncell = lm_cell0
 

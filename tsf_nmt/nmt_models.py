@@ -24,10 +24,11 @@ import build_ops
 
 
 def _reverse_encoder(source,
-                    src_embedding,
-                    encoder_cell,
-                    batch_size,
-                    dtype=tf.float32):
+                     src_embedding,
+                     encoder_cell,
+                     batch_size,
+                     dropout=None,
+                     dtype=tf.float32):
     """
 
     Parameters
@@ -47,6 +48,11 @@ def _reverse_encoder(source,
         emb_inp = [embedding_ops.embedding_lookup(src_embedding, s) for s in source]
 
     initial_state = encoder_cell.zero_state(batch_size=batch_size, dtype=dtype)
+
+    if dropout is not None:
+
+        for cell in encoder_cell._cells:
+            cell.input_keep_prob = 1.0 - dropout
 
     outputs, state = rnn.rnn(encoder_cell, emb_inp,
                               initial_state=initial_state,
@@ -266,6 +272,7 @@ class Seq2SeqModel(object):
             self.output_attention = output_attention
             self.max_len = max_len
             self.dropout = dropout
+            self.dropout_feed = tf.placeholder(tf.float32, name="dropout_rate")
 
             self.dtype = dtype
 
@@ -322,8 +329,6 @@ class Seq2SeqModel(object):
             self.encoder_inputs = []
             self.decoder_inputs = []
             self.target_weights = []
-            # dropout feed
-            dropout_feed = tf.placeholder(tf.float32, name="dropout_feed")
 
             for i in xrange(buckets[-1][0]):  # Last bucket is the biggest one.
                 self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
@@ -417,11 +422,11 @@ class Seq2SeqModel(object):
 
         # decode target - note that we pass decoder_states as None when training the model
         outputs, state = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
-                                                  self.target_vocab_size, self.output_projection,
-                                                  batch_size=b_size, attention_type=self.attention_type,
-                                                  do_decode=do_decode, input_feeding=self.input_feeding,
-                                                  content_function=self.content_function, dtype=self.dtype,
-                                                  output_attention=self.output_attention)
+                                 self.target_vocab_size, self.output_projection,
+                                 batch_size=b_size, attention_type=self.attention_type,
+                                 do_decode=do_decode, input_feeding=self.input_feeding,
+                                 content_function=self.content_function, dtype=self.dtype,
+                                 output_attention=self.output_attention)
 
         # return the output (logits) and internal states
         return outputs, state
@@ -435,7 +440,7 @@ class Seq2SeqModel(object):
                 scope.reuse_variables()
             context, decoder_initial_state = _reverse_encoder(
                     source, self.src_embedding, self.encoder_cell,
-                    batch_size, dtype=self.dtype)
+                    batch_size, dropout=self.dropout_feed, dtype=self.dtype)
 
             # First calculate a concatenation of encoder outputs to put attention on.
             top_states = [
@@ -556,9 +561,11 @@ class Seq2SeqModel(object):
 
         # Output feed: depends on whether we do a backward step or not.
         if validation_step:
+            input_feed[self.dropout_feed.name] = 0.0
             output_feed = [self.losses[bucket_id]]  # Loss for this batch.
 
         else:
+            input_feed[self.dropout_feed.name] = self.dropout
             output_feed = [self.updates[bucket_id],  # Update Op that does SGD.
                            self.gradient_norms[bucket_id],  # Gradient norm.
                            self.losses[bucket_id]]  # Loss for this batch.

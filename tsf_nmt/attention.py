@@ -20,7 +20,7 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
                                 batch_size, num_symbols, window_size=10, output_size=None,
                                 output_projection=None, input_feeding=False, feed_previous=False,
                                 attention_type=None, content_function=VINYALS_KAISER, output_attention=False,
-                                translate=False, beam_size=12, dtype=tf.float32, scope=None):
+                                translate=False, beam_size=12, dropout=None, dtype=tf.float32, scope=None):
     """
     RNN decoder with embedding and attention and a pure-decoding option.
 
@@ -122,6 +122,11 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
                                                             num_symbols])
         proj_biases = ops.convert_to_tensor(output_projection[1], dtype=dtype)
         proj_biases.get_shape().assert_is_compatible_with([num_symbols])
+
+    if dropout is not None:
+
+        for cell in cell._cells:
+            cell.input_keep_prob = 1.0 - dropout
 
     with vs.variable_scope(scope or "embedding_attention_decoder"):
         with ops.device("/cpu:0"):

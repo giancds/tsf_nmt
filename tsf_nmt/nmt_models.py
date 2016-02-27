@@ -87,6 +87,7 @@ def _decode(target,
             output_attention=False,
             translate=False,
             beam_size=12,
+            dropout=None,
             dtype=tf.float32):
     """
 
@@ -350,14 +351,15 @@ class Seq2SeqModel(object):
                 b_size = array_ops.shape(self.encoder_inputs[0])[0]
 
                 # context, decoder_initial_state, attention_states
-                self.context, self.decoder_initial_state, self.attention_states = self.encode(self.encoder_inputs, b_size)
+                self.context, self.decoder_initial_state, self.attention_states = self.encode(self.encoder_inputs,
+                                                                                              b_size)
 
                 self.outputs, self.scores, self.hypothesis_path = _decode(
                     [self.decoder_inputs[0]], self.decoder_cell, self.decoder_initial_state, self.attention_states,
                     self.target_vocab_size, self.output_projection, batch_size=b_size,
                     attention_type=self.attention_type, content_function=self.content_function, do_decode=True,
                     input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
-                    translate=forward_only, beam_size=beam_size
+                    translate=forward_only, beam_size=beam_size, dropout=self.dropout_feed
                 )
 
             else:
@@ -426,7 +428,7 @@ class Seq2SeqModel(object):
                                  batch_size=b_size, attention_type=self.attention_type,
                                  do_decode=do_decode, input_feeding=self.input_feeding,
                                  content_function=self.content_function, dtype=self.dtype,
-                                 output_attention=self.output_attention)
+                                 output_attention=self.output_attention, dropout=self.dropout_feed)
 
         # return the output (logits) and internal states
         return outputs, state
@@ -641,6 +643,7 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
 
         input_feed[self.decoder_inputs[0].name] = decoder_inputs[0],
+        input_feed[self.dropout_feed.name] = 0.0
 
         # we select the last element of ret0 to keep as it is a list of hidden_states
         output_feed = [self.outputs, self.scores, self.hypothesis_path]

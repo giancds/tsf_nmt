@@ -43,7 +43,7 @@ flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by t
 flags.DEFINE_integer('start_decay', 0, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
 flags.DEFINE_string('optimizer', 'adam', 'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
-flags.DEFINE_float('max_gradient_norm', 1.0, 'Clip gradients to this norm.')
+flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
 flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
 flags.DEFINE_integer('max_len', 100, 'Max size of the beam used for decoding.')
@@ -70,10 +70,10 @@ flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.'
 flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm1_adam.ckpt',
+flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
                            'Model name')
 flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm1_adam/', 'Train directory')
+flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
 flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')

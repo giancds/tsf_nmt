@@ -81,7 +81,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
             n_target_words += n_words
 
             # session, encoder_inputs, decoder_inputs, target_weights, bucket_id
-            _, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
+            gradient_norm, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
                                                decoder_inputs=decoder_inputs,
                                                target_weights=target_weights,
                                                bucket_id=bucket_id,
@@ -89,21 +89,25 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
             # step_loss = numpy.nan
 
             if numpy.isnan(step_loss) or numpy.isinf(step_loss):
+
                 print('\nNaN detected\n')
                 nan_detected = True
 
-                # last_checkpoints = model.saver.last_checkpoints
-                #
-                # if len(last_checkpoints)  > 3:
-                #     old_model = last_checkpoints[-3]
-                # else:
-                #     old_model = last_checkpoints[0]
-                #
-                # print('Reading model parameters from %s\n' % old_model)
-                # model.saver.restore(sess, old_model)
-                #
-                # print('\nReturning to optimization...\n')
-                #
+                print("\nStep loss:")
+                print(step_loss)
+
+                print("\nEncoder inputs: ")
+                print(encoder_inputs)
+
+                print("\nDecoder inputs: ")
+                print(decoder_inputs)
+
+                print("\nTarget weights inputs: ")
+                print(target_weights)
+
+                print("\nGradient norm: ")
+                print(gradient_norm)
+
                 break
 
             currloss = model.current_loss.eval()
@@ -315,16 +319,6 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
             print('\n   best valid. loss during training: %.8f' % model.best_eval_loss.eval())
 
             sys.stdout.flush()
-
-
-# TODO: there is a better way of turning dropout off during validation? - this is a little bit "hacky"
-def _turn_dropout(model, rate=0.0):
-
-    for cell in model.encoder_cell._cells:
-        cell.input_keep_prob = rate
-
-    for cell in model.decoder_cell._cells:
-        cell.input_keep_prob = rate
 
 
 def train_lm(FLAGS=None):

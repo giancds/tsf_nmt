@@ -2,7 +2,7 @@ import tensorflow as tf
 
 from tensorflow.models.rnn import rnn_cell
 
-import lm_models, nmt_models, cells
+import lm_models, nmt_models
 from tensorflow.python.platform import gfile
 
 
@@ -25,7 +25,7 @@ def get_optimizer(name='sgd', lr_rate=0.1, decay=0.9):
     elif name is 'adagrad':
         optimizer = tf.train.AdagradOptimizer(lr_rate)
     elif name is 'adam':
-        optimizer = tf.train.AdamOptimizer(lr_rate, epsilon=1e-5)
+        optimizer = tf.train.AdamOptimizer(lr_rate, epsilon=1e-8)
     elif name is 'rmsprop':
         optimizer = tf.train.RMSPropOptimizer(lr_rate, decay)
     else:
@@ -40,7 +40,7 @@ def build_nmt_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size
     if use_lstm:
         cell_class = rnn_cell.LSTMCell
     else:
-        cell_class = cells.GRU
+        cell_class = rnn_cell.GRUCell
 
     encoder_cell = cell_class(num_units=encoder_size, input_size=source_proj_size)
     if input_feeding:
@@ -65,7 +65,7 @@ def build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=True, dr
     if use_lstm:
         cell_class = rnn_cell.LSTMCell
     else:
-        cell_class = cells.GRU
+        cell_class = rnn_cell.GRUCell
 
     if num_layers > 1:
 
@@ -134,6 +134,7 @@ def create_nmt_model(session, forward_only, model_path=None, use_best=False, FLA
                                     attention_type=FLAGS.attention_type,
                                     content_function=FLAGS.content_function,
                                     output_attention=FLAGS.output_attention,
+                                    num_samples=FLAGS.num_samples_loss,
                                     forward_only=forward_only,
                                     beam_size=FLAGS.beam_size,
                                     max_len=FLAGS.max_len,

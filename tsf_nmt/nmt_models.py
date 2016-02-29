@@ -131,7 +131,7 @@ def _decode(target,
                 content_function=content_function,
                 output_attention=output_attention,
                 translate=translate, beam_size=beam_size,
-                scope='decoder_with_attention'
+                scope='decoder_with_attention', dropout=dropout,
             )
 
             return b_symbols, log_probs, b_path
@@ -148,7 +148,7 @@ def _decode(target,
                 content_function=content_function,
                 output_attention=output_attention,
                 translate=translate, beam_size=beam_size,
-                scope='decoder_with_attention'
+                scope='decoder_with_attention', dropout=dropout,
             )
 
             return outputs, states
@@ -281,14 +281,14 @@ class Seq2SeqModel(object):
             self.output_projection = None
             loss_function = None
 
+            with tf.device("/cpu:0"):
+                w = tf.get_variable("proj_w", [decoder_size, self.target_vocab_size])
+                w_t = tf.transpose(w)
+                b = tf.get_variable("proj_b", [self.target_vocab_size])
+            self.output_projection = (w, b)
+
             # Sampled softmax only makes sense if we sample less than vocabulary size.
             if 0 < num_samples < self.target_vocab_size:
-                with tf.device("/cpu:0"):
-                    w = tf.get_variable("proj_w", [decoder_size, self.target_vocab_size])
-                    w_t = tf.transpose(w)
-                    b = tf.get_variable("proj_b", [self.target_vocab_size])
-                self.output_projection = (w, b)
-
                 def sampled_loss(inputs, labels):
                     with tf.device("/cpu:0"):
                         labels = tf.reshape(labels, [-1, 1])

@@ -125,8 +125,8 @@ def embedding_attention_decoder(decoder_inputs, initial_state, attention_states,
 
     if dropout is not None:
 
-        for cell in cell._cells:
-            cell.input_keep_prob = 1.0 - dropout
+        for c in cell._cells:
+            c.input_keep_prob = 1.0 - dropout
 
     with vs.variable_scope(scope or "embedding_attention_decoder"):
         with ops.device("/cpu:0"):

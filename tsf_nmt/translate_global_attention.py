@@ -115,7 +115,8 @@ def main(_):
 
         # model_path = FLAGS.best_models_dir + FLAGS.model_name + '-best-0'
         model_path = None
-        decode_from_file('/home/gian/data/fapesp-v2.pt-en.test-a.tok.en',
+        decode_from_file(['/home/gian/data/fapesp-v2.pt-en.test-a.tok.en',
+                          '/home/gian/data/fapesp-v2.pt-en.test-b.tok.en'],
                          model_path=model_path, use_best=True, FLAGS=FLAGS,
                          buckets=_buckets)
 

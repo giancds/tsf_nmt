@@ -509,17 +509,16 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
             if i > 0:
                 vs.get_variable_scope().reuse_variables()
 
-            if input_feeding:
-                reshaped = tf.reshaper(decoder_inputs[-1], [-1, attn_size])
-                # if using input_feeding, concatenate previous attention with input to layers
-                inp = array_ops.concat(1, [reshaped, ht_hat])
-            else:
-                inp = decoder_inputs[-1]
+            inp = decoder_inputs[-1]
 
             # If loop_function is set, we use it instead of decoder_inputs.
             if loop_function is not None and prev is not None:
                 with vs.variable_scope("loop_function", reuse=True):
                     inp = array_ops.stop_gradient(loop_function(prev, 12))
+
+            if input_feeding:
+                # if using input_feeding, concatenate previous attention with input to layers
+                inp = array_ops.concat(1, [inp, ht_hat])
 
             if combine_inp_attn:
                 # Merge input and previous attentions into one vector of the right size.
@@ -585,13 +584,13 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
             beam_path.append(beam_parent)
             log_beam_probs.append(best_probs)
 
-            # given the predicted words, get their embeddings
-            emb = embedding_ops.embedding_lookup(embeddings, symbols)
-
-            # add the embeddings to the inputs for the next round
-            decoder_inputs.append(emb)
-
-            # print('')
+            # # given the predicted words, get their embeddings
+            # emb = embedding_ops.embedding_lookup(embeddings, symbols)
+            #
+            # # add the embeddings to the inputs for the next round
+            # decoder_inputs.append(emb)
+            #
+            # # print('')
 
     b_symbols = tf.concat(0, beam_symbols)
     log_probs = tf.concat(0, log_beam_probs)
@@ -1199,17 +1198,16 @@ def _attention_decoder_output_search(decoder_inputs, initial_state, attention_st
             if i > 0:
                 vs.get_variable_scope().reuse_variables()
 
-            if input_feeding:
-                reshaped = tf.reshaper(decoder_inputs[-1], [-1, attn_size])
-                # if using input_feeding, concatenate previous attention with input to layers
-                inp = array_ops.concat(1, [reshaped, ht_hat])
-            else:
-                inp = decoder_inputs[-1]
+            inp = decoder_inputs[-1]
 
             # If loop_function is set, we use it instead of decoder_inputs.
             if loop_function is not None and prev is not None:
                 with vs.variable_scope("loop_function", reuse=True):
                     inp = array_ops.stop_gradient(loop_function(prev, 12))
+
+            if input_feeding:
+                # if using input_feeding, concatenate previous attention with input to layers
+                inp = array_ops.concat(1, [inp, ht_hat])
 
             if combine_inp_attn:
                 # Merge input and previous attentions into one vector of the right size.
@@ -1280,11 +1278,11 @@ def _attention_decoder_output_search(decoder_inputs, initial_state, attention_st
             beam_path.append(beam_parent)
             log_beam_probs.append(best_probs)
 
-            # given the predicted words, get their embeddings
-            emb = embedding_ops.embedding_lookup(embeddings, symbols)
-
-            # add the embeddings to the inputs for the next round
-            decoder_inputs.append(emb)
+            # # given the predicted words, get their embeddings
+            # emb = embedding_ops.embedding_lookup(embeddings, symbols)
+            #
+            # # add the embeddings to the inputs for the next round
+            # decoder_inputs.append(emb)
 
             # print('')
 

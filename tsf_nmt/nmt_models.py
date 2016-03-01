@@ -357,7 +357,7 @@ class Seq2SeqModel(object):
                 self.outputs, self.scores, self.hypothesis_path = _decode(
                     [self.decoder_inputs[0]], self.decoder_cell, self.decoder_initial_state, self.attention_states,
                     self.target_vocab_size, self.output_projection, batch_size=b_size,
-                    attention_type=self.attention_type, content_function=self.content_function, feed_previous=False,
+                    attention_type=self.attention_type, content_function=self.content_function, feed_previous=True,
                     input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
                     translate=forward_only, beam_size=beam_size, dropout=self.dropout_feed
                 )
@@ -689,8 +689,8 @@ class Seq2SeqModel(object):
             if normalize:
                 score /= length
 
-            sample.append(hypothesis)
-            sample_score.append(hyp_score)
+            sample.append(hyp)
+            sample_score.append(score)
 
         n_best = numpy.array(sample)
         n_best_scores = numpy.array(sample_score)

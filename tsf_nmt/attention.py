@@ -1027,7 +1027,7 @@ def _attention_decoder_output(decoder_inputs, initial_state, attention_states, c
 
             with vs.variable_scope("AttnOutputProjection", initializer=initializer):
 
-                ht = _decoder_output_attention(cell_outputs, attn_size)
+                ht = _decoder_output_attention(cell_outputs, attn_size, initializer=initializer)
 
                 output = cells.linear([ht] + [ht_hat], output_size, True)
 

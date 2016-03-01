@@ -80,7 +80,7 @@ def _decode(target,
             target_vocab_size,
             output_projection,
             batch_size,
-            do_decode=False,
+            feed_previous=False,
             input_feeding=False,
             attention_type=None,
             content_function='vinyals_kayser',
@@ -100,7 +100,7 @@ def _decode(target,
     target_vocab_size
     output_projection
     batch_size
-    do_decode
+    feed_previous
     input_feeding
     attention_type
     content_function
@@ -126,7 +126,7 @@ def _decode(target,
                 target, decoder_initial_state, attention_states,
                 decoder_cell, batch_size, target_vocab_size,
                 output_size=None, output_projection=output_projection,
-                feed_previous=do_decode, input_feeding=input_feeding,
+                feed_previous=feed_previous, input_feeding=input_feeding,
                 attention_type=attention_type, dtype=dtype,
                 content_function=content_function,
                 output_attention=output_attention,
@@ -143,7 +143,7 @@ def _decode(target,
                 target, decoder_initial_state, attention_states,
                 decoder_cell, batch_size, target_vocab_size,
                 output_size=None, output_projection=output_projection,
-                feed_previous=do_decode, input_feeding=input_feeding,
+                feed_previous=feed_previous, input_feeding=input_feeding,
                 attention_type=attention_type, dtype=dtype,
                 content_function=content_function,
                 output_attention=output_attention,
@@ -357,7 +357,7 @@ class Seq2SeqModel(object):
                 self.outputs, self.scores, self.hypothesis_path = _decode(
                     [self.decoder_inputs[0]], self.decoder_cell, self.decoder_initial_state, self.attention_states,
                     self.target_vocab_size, self.output_projection, batch_size=b_size,
-                    attention_type=self.attention_type, content_function=self.content_function, do_decode=True,
+                    attention_type=self.attention_type, content_function=self.content_function, feed_previous=False,
                     input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
                     translate=forward_only, beam_size=beam_size, dropout=self.dropout_feed
                 )
@@ -426,7 +426,7 @@ class Seq2SeqModel(object):
         outputs, state = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
                                  self.target_vocab_size, self.output_projection,
                                  batch_size=b_size, attention_type=self.attention_type,
-                                 do_decode=do_decode, input_feeding=self.input_feeding,
+                                 feed_previous=do_decode, input_feeding=self.input_feeding,
                                  content_function=self.content_function, dtype=self.dtype,
                                  output_attention=self.output_attention, dropout=self.dropout_feed)
 

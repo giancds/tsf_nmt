@@ -510,8 +510,9 @@ def _attention_decoder_search(decoder_inputs, initial_state, attention_states, c
                 vs.get_variable_scope().reuse_variables()
 
             if input_feeding:
+                reshaped = tf.reshaper(decoder_inputs[-1], [-1, attn_size])
                 # if using input_feeding, concatenate previous attention with input to layers
-                inp = array_ops.concat(1, [decoder_inputs[-1], ht_hat])
+                inp = array_ops.concat(1, [reshaped, ht_hat])
             else:
                 inp = decoder_inputs[-1]
 
@@ -1199,10 +1200,11 @@ def _attention_decoder_output_search(decoder_inputs, initial_state, attention_st
                 vs.get_variable_scope().reuse_variables()
 
             if input_feeding:
+                reshaped = tf.reshaper(decoder_inputs[-1], [-1, attn_size])
                 # if using input_feeding, concatenate previous attention with input to layers
-                inp = array_ops.concat(1, [decoder_inputs[i], ht_hat])
+                inp = array_ops.concat(1, [reshaped, ht_hat])
             else:
-                inp = decoder_inputs[i]
+                inp = decoder_inputs[-1]
 
             # If loop_function is set, we use it instead of decoder_inputs.
             if loop_function is not None and prev is not None:

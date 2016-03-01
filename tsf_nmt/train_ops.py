@@ -82,13 +82,15 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
             # session, encoder_inputs, decoder_inputs, target_weights, bucket_id
             gradient_norm, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
-                                               decoder_inputs=decoder_inputs,
-                                               target_weights=target_weights,
-                                               bucket_id=bucket_id,
-                                               validation_step=False)
+                                                           decoder_inputs=decoder_inputs,
+                                                           target_weights=target_weights,
+                                                           bucket_id=bucket_id,
+                                                           validation_step=False)
             # step_loss = numpy.nan
 
             if numpy.isnan(step_loss) or numpy.isinf(step_loss):
+
+                numpy.set_printoptions(linewidth=200)
 
                 print('\nNaN detected\n')
                 nan_detected = True

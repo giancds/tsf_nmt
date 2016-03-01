@@ -81,6 +81,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
             n_target_words += n_words
 
             # session, encoder_inputs, decoder_inputs, target_weights, bucket_id
+            # note: step loss is averaged across the batch
             gradient_norm, step_loss, _ = model.train_step(session=sess, encoder_inputs=encoder_inputs,
                                                            decoder_inputs=decoder_inputs,
                                                            target_weights=target_weights,

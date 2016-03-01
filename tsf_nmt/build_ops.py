@@ -1,9 +1,10 @@
 import tensorflow as tf
-
 from tensorflow.models.rnn import rnn_cell
-
-import lm_models, nmt_models
 from tensorflow.python.platform import gfile
+
+import lm_models
+import nmt_models
+import cells
 
 
 def get_optimizer(name='sgd', lr_rate=0.1, decay=0.9):
@@ -40,14 +41,16 @@ def build_nmt_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size
     if use_lstm:
         cell_class = rnn_cell.LSTMCell
     else:
-        cell_class = rnn_cell.GRUCell
+        cell_class = cells.GRUCell
 
-    encoder_cell = cell_class(num_units=encoder_size, input_size=source_proj_size)
+    initializer = tf.random_uniform_initializer(minval=-0.1, maxval=0.1, seed=1234)
+
+    encoder_cell = cell_class(num_units=encoder_size, input_size=source_proj_size, initializer=initializer)
     if input_feeding:
-        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size * 2)
+        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size * 2, initializer=initializer)
     else:
-        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size)
-    decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size)
+        decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size, initializer=initializer)
+    decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size, initializer=initializer)
 
     # if dropout > 0.0:  # if dropout is 0.0, it is turned off
     encoder_cell = rnn_cell.DropoutWrapper(encoder_cell, output_keep_prob=1.0 - dropout)

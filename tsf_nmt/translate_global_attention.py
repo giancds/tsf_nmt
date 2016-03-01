@@ -105,7 +105,7 @@ FLAGS = flags.FLAGS
 _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
 # _buckets = [(50, 50)]
 
-
+tf.random_uniform_initializer()
 def main(_):
 
     if FLAGS.decode_input:

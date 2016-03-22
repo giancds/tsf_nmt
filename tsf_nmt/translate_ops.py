@@ -62,11 +62,15 @@ def decode_from_file(files, model_path=None, use_best=False, get_ids=True, FLAGS
 
                         else:
 
-                             # if sentence is already converted, just split the ids
+                            # if sentence is already converted, just split the ids
                             token_ids = [int(ss) for ss in sentence.strip().split()]
 
                         # Get output logits for the sentence.
-                        output_hypotheses, output_scores = model.translation_step(sess, token_ids)
+                        output_hypotheses, output_scores = model.translation_step(sess,
+                                                                                  token_ids,
+                                                                                  FLAGS.beam_size,
+                                                                                  normalize=True,
+                                                                                  dump_remaining=True)
 
                         outputs = output_hypotheses[0]
 

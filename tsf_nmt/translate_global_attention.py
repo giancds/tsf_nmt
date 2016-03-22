@@ -38,17 +38,18 @@ from translate_ops import decode_from_stdin, decode_from_file
 flags = tf.flags
 
 # flags related to the model optimization
-flags.DEFINE_float('learning_rate', 0.0002, 'Learning rate.')
+flags.DEFINE_float('learning_rate', 0.001, 'Learning rate.')
 flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by this much. Setting it to 1.0 will not affect the learning rate.')
 flags.DEFINE_integer('start_decay', 0, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
+flags.DEFINE_integer('stop_decay', 0, 'Stop learning rate decay at this epoch. Set to 0 to use patience.')
 flags.DEFINE_string('optimizer', 'adam', 'Name of the optimizer to use (adagrad, adam, rmsprop or sgd')
 
 flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
 flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
 flags.DEFINE_integer('num_samples_loss', 0, 'Number of samples to use in sampled softmax. Set to 0 to use regular loss.')
-flags.DEFINE_integer('max_len', 100, 'Max size of the beam used for decoding.')
-flags.DEFINE_integer('max_epochs', 30,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
+flags.DEFINE_integer('max_len', 120, 'Max size of the beam used for decoding.')
+flags.DEFINE_integer('max_epochs', 23,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
 flags.DEFINE_integer('max_train_data_size', 0, 'Limit on the size of training data (0: no limit).')
 
 flags.DEFINE_boolean('cpu_only', False, 'Whether or not to use GPU only.')
@@ -62,7 +63,7 @@ flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention sta
 flags.DEFINE_boolean('output_attention', True, 'Whether to pay attention on the decoder outputs. Default to False.')
 flags.DEFINE_integer('proj_size', 500, 'Size of words projection.')
 flags.DEFINE_integer('hidden_size', 500, 'Size of each layer.')
-flags.DEFINE_integer('num_layers', 2, 'Number of layers in each component of the model.')
+flags.DEFINE_integer('num_layers', 1, 'Number of layers in each component of the model.')
 
 flags.DEFINE_float('dropout', 0.0, 'Dropout rate. When the value is 0.0 dropout is turned off. Optimal should be 0.2 as indicated by Zaremba et al. (2014)')
 
@@ -71,10 +72,10 @@ flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.'
 flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_2lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
+flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
                            'Model name')
 flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_2lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
+flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
 flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
@@ -84,14 +85,15 @@ flags.DEFINE_string('source_lang', 'en', 'Source language extension.')
 flags.DEFINE_string('target_lang', 'pt', 'Target language extension.')
 
 # verbosity and checkpoints
-flags.DEFINE_integer('steps_per_checkpoint', 100, 'How many training steps to do per checkpoint.')
+flags.DEFINE_integer('steps_per_checkpoint', 500, 'How many training steps to do per checkpoint.')
 flags.DEFINE_integer('steps_per_validation', 1000, 'How many training steps to do between each validation.')
 flags.DEFINE_integer('steps_verbosity', 10, 'How many training steps to do between each information print.')
 
 # pacience flags (learning_rate decay and early stop)
 flags.DEFINE_integer('lr_rate_patience', 3, 'How many training steps to monitor.')
 flags.DEFINE_integer('early_stop_patience', 20, 'How many training steps to monitor.')
-flags.DEFINE_integer('early_stop_after_epoch', 1, 'Start monitoring early_stop after this epoch.')
+flags.DEFINE_integer('early_stop_after_epoch', 20, 'Start monitoring early_stop after this epoch.')
+flags.DEFINE_boolean('save_best_model', True, 'Set to True to save the best model even if not using early stop.')
 
 # decoding/testing flags
 flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
@@ -102,10 +104,10 @@ FLAGS = flags.FLAGS
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 # _buckets = [(5, 10), (10, 15), (20, 25), (40, 50), (50, 50)]
-_buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
+_buckets = [(5, 10), (10, 15), (15, 20), (20, 25), (25, 30), (30, 35), (35, 40), (40, 45), (45, 50), (50, 50)]
 # _buckets = [(50, 50)]
 
-tf.random_uniform_initializer()
+
 def main(_):
 
     if FLAGS.decode_input:

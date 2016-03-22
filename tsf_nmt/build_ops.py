@@ -142,7 +142,8 @@ def create_nmt_model(session, forward_only, model_path=None, use_best=False, FLA
                                     beam_size=FLAGS.beam_size,
                                     max_len=FLAGS.max_len,
                                     cpu_only=FLAGS.cpu_only,
-                                    early_stop_patience=FLAGS.early_stop_patience)
+                                    early_stop_patience=FLAGS.early_stop_patience,
+                                    save_best_model=FLAGS.save_best_model)
 
     if model_path is None:
 

@@ -182,7 +182,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                 sess.run(model.samples_seen_reset_op)
 
                 if FLAGS.start_decay > 0:
-                    if model.epoch.eval() >= FLAGS.start_decay:
+                    if FLAGS.start_decay <= model.epoch.eval() <= FLAGS.stop_decay:
                         sess.run(model.learning_rate_decay_op)
 
             if current_step % FLAGS.steps_per_validation == 0:
@@ -262,9 +262,12 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                     print('early stop patience: %d - max %d\n' % (int(model.estop_counter.eval()), estop))
 
                 # else:
-                #
+                #     if FLAGS.
                 #     if avg_eval_loss < model.best_eval_loss.eval():
                 #         sess.run(model.best_eval_loss.assign(avg_eval_loss))
+                #         print('Saving the best model so far...')
+                #         best_model_path = os.path.join(FLAGS.best_models_dir, FLAGS.model_name + '-best')
+                #         model.saver_best.save(sess, best_model_path, global_step=model.global_step)
                 #
                 #     print('\n   best valid. loss: %.8f' % model.best_eval_loss.eval())
 

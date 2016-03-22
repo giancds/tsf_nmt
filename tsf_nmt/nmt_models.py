@@ -155,9 +155,7 @@ def _decode(target,
             input_feeding=False,
             attention_type=None,
             content_function='vinyals_kayser',
-            output_attention=False,
-            translate=False,
-            beam_size=12,
+            output_attention=None,
             step_num=None,
             dropout=None,
             decoder_states=None,
@@ -198,7 +196,7 @@ def _decode(target,
         output_size=None, output_projection=output_projection,
         feed_previous=feed_previous, input_feeding=input_feeding,
         attention_type=attention_type, dtype=dtype,
-        content_function=content_function, beam_size=beam_size,
+        content_function=content_function,
         output_attention=output_attention,
         scope='decoder_with_attention', dropout=dropout,
         decoder_states=decoder_states, step_num=step_num
@@ -245,7 +243,7 @@ class Seq2SeqModel(object):
                  forward_only=False,
                  max_len=100,
                  cpu_only=False,
-                 output_attention=False,
+                 output_attention="None",
                  early_stop_patience=0,
                  save_best_model=True,
                  beam_size=12,
@@ -324,7 +322,12 @@ class Seq2SeqModel(object):
             self.decoder_size = decoder_size
 
             self.input_feeding = input_feeding
-            self.output_attention = output_attention
+
+            if output_attention == "None":
+                self.output_attention = None
+            else:
+                self.output_attention = output_attention
+
             self.max_len = max_len
             self.dropout = dropout
             self.dropout_feed = tf.placeholder(tf.float32, name="dropout_rate")
@@ -429,7 +432,7 @@ class Seq2SeqModel(object):
                 self.logits, self.states, self.decoder_states = _decode(
                     [self.decoder_inputs[0]], self.decoder_cell, self.decoder_init_plcholder, self.attn_plcholder,
                     self.target_vocab_size, self.output_projection, batch_size=b_size, step_num=self.step_num,
-                    attention_type=self.attention_type, content_function=self.content_function, translate=True,
+                    attention_type=self.attention_type, content_function=self.content_function,
                     input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
                     decoder_states=decoder_states
                 )

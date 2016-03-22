@@ -60,7 +60,7 @@ flags.DEFINE_string('attention_type', 'global', 'Which type of attention to use.
 flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
 flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
-flags.DEFINE_boolean('output_attention', True, 'Whether to pay attention on the decoder outputs. Default to False.')
+flags.DEFINE_string('output_attention', attention.DECODER_TYPE_2, 'Whether to pay attention on the decoder outputs. Default to False.')
 flags.DEFINE_integer('proj_size', 500, 'Size of words projection.')
 flags.DEFINE_integer('hidden_size', 500, 'Size of each layer.')
 flags.DEFINE_integer('num_layers', 1, 'Number of layers in each component of the model.')
@@ -72,10 +72,10 @@ flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.'
 flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-flags.DEFINE_string('model_name', 'model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
+flags.DEFINE_string('model_name', 'model_lstm_global_output_type2_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
                            'Model name')
 flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
+flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_type2_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
 flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')

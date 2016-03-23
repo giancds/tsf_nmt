@@ -31,6 +31,7 @@ See the following papers for more information on neural translation models.
 from __future__ import print_function
 import tensorflow as tf
 
+import content_functions
 import attention
 from train_ops import train_nmt
 from translate_ops import decode_from_stdin, decode_from_file
@@ -56,11 +57,12 @@ flags.DEFINE_boolean('cpu_only', False, 'Whether or not to use GPU only.')
 
 # flags related to model architecture
 flags.DEFINE_string('model', 'seq2seq', 'one of these models: seq2seq')
-flags.DEFINE_string('attention_type', 'global', 'Which type of attention to use. One of local, global and hybrid.')
-flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
+flags.DEFINE_string('attention_type', attention.GLOBAL, 'Which type of attention to use. One of local, global and hybrid.')
+flags.DEFINE_integer('window_size', 10, 'Size of each size of the window to use when applying local attention. Not relevant to global attention')
+flags.DEFINE_string('content_function', content_functions.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
 flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
-flags.DEFINE_string('output_attention', attention.DECODER_TYPE_2, 'Whether to pay attention on the decoder outputs. Default to False.')
+flags.DEFINE_string('output_attention', content_functions.DECODER_TYPE_1, 'Whether to pay attention on the decoder outputs. Default to False.')
 flags.DEFINE_integer('proj_size', 500, 'Size of words projection.')
 flags.DEFINE_integer('hidden_size', 500, 'Size of each layer.')
 flags.DEFINE_integer('num_layers', 1, 'Number of layers in each component of the model.')

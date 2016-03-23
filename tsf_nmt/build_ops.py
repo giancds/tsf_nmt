@@ -2,6 +2,9 @@ import tensorflow as tf
 from tensorflow.models.rnn import rnn_cell
 from tensorflow.python.platform import gfile
 
+import attention
+import content_functions
+import decoders
 import lm_models
 import nmt_models
 import cells
@@ -117,6 +120,15 @@ def create_nmt_model(session, forward_only, model_path=None, use_best=False, FLA
     if translate:
         dropout_rate = 0.0
 
+    if FLAGS.output_attention == "None":
+        decoder = decoders.attention_decoder
+    else:
+        decoder = decoders.attention_decoder_output
+
+    attention_f = attention.get_attention_f(FLAGS.attention_type)
+    content_function = content_functions.get_content_f(FLAGS.content_function)
+    decoder_attention_f = content_functions.get_decoder_content_f(FLAGS.output_attention)
+
     model = nmt_models.Seq2SeqModel(source_vocab_size=FLAGS.src_vocab_size,
                                     target_vocab_size=FLAGS.tgt_vocab_size,
                                     buckets=buckets,
@@ -130,16 +142,17 @@ def create_nmt_model(session, forward_only, model_path=None, use_best=False, FLA
                                     batch_size=batch,
                                     learning_rate=FLAGS.learning_rate,
                                     learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
+                                    decoder=decoder,
                                     optimizer=FLAGS.optimizer,
                                     use_lstm=FLAGS.use_lstm,
                                     input_feeding=FLAGS.input_feeding,
                                     dropout=dropout_rate,
-                                    attention_type=FLAGS.attention_type,
-                                    content_function=FLAGS.content_function,
-                                    output_attention=FLAGS.output_attention,
+                                    attention_f=attention_f,
+                                    window_size=FLAGS.window_size,
+                                    content_function=content_function,
+                                    decoder_attention_f=decoder_attention_f,
                                     num_samples=FLAGS.num_samples_loss,
                                     forward_only=forward_only,
-                                    beam_size=FLAGS.beam_size,
                                     max_len=FLAGS.max_len,
                                     cpu_only=FLAGS.cpu_only,
                                     early_stop_patience=FLAGS.early_stop_patience,

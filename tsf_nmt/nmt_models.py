@@ -13,12 +13,12 @@ import numpy
 import pkg_resources
 import tensorflow as tf
 
-from tensorflow.models.rnn import seq2seq, rnn
-from tensorflow.python.ops import nn_ops, embedding_ops  #, rnn
+from tensorflow.models.rnn import seq2seq
+from tensorflow.python.ops import nn_ops
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 import data_utils
-import attention
+import encoders
 import build_ops
 from tensorflow.python.ops import variable_scope
 # from six.moves import xrange
@@ -94,117 +94,6 @@ def model_with_buckets(encoder_inputs, decoder_inputs, targets, weights,
     return outputs, losses
 
 
-def _reverse_encoder(source,
-                     src_embedding,
-                     encoder_cell,
-                     batch_size,
-                     dropout=None,
-                     dtype=tf.float32):
-    """
-
-    Parameters
-    ----------
-    source
-    src_embedding
-    encoder_cell
-    batch_size
-    dtype
-
-    Returns
-    -------
-
-    """
-    # get the embeddings
-    with ops.device("/cpu:0"):
-        emb_inp = [embedding_ops.embedding_lookup(src_embedding, s) for s in source]
-
-    initial_state = encoder_cell.zero_state(batch_size=batch_size, dtype=dtype)
-
-    if dropout is not None:
-
-        for cell in encoder_cell._cells:
-            cell.input_keep_prob = 1.0 - dropout
-
-    outputs, state = rnn.rnn(encoder_cell, emb_inp,
-                              initial_state=initial_state,
-                              dtype=dtype,
-                              scope='reverse_encoder')
-
-    hidden_states = outputs
-
-    tf_version = pkg_resources.get_distribution("tensorflow").version
-
-    if tf_version == '0.6.0':
-
-        decoder_initial_state = state[-1]
-    else:
-
-        decoder_initial_state = state
-
-    return hidden_states, decoder_initial_state
-
-
-def _decode(target,
-            decoder_cell,
-            decoder_initial_state,
-            attention_states,
-            target_vocab_size,
-            output_projection,
-            batch_size,
-            feed_previous=False,
-            input_feeding=False,
-            attention_type=None,
-            content_function='vinyals_kayser',
-            output_attention=None,
-            step_num=None,
-            dropout=None,
-            decoder_states=None,
-            dtype=tf.float32):
-    """
-
-    Parameters
-    ----------
-    target
-    decoder_cell
-    decoder_initial_state
-    attention_states
-    target_vocab_size
-    output_projection
-    batch_size
-    feed_previous
-    input_feeding
-    attention_type
-    content_function
-    output_attention
-    translate
-    beam_size
-    dtype
-
-    Returns
-    -------
-
-    """
-    assert attention_type is not None
-    assert step_num is not None
-
-    assert attention_type is 'local' or attention_type is 'global' or attention_type is 'hybrid'
-
-    # run the decoder with attention
-    outputs, cell_state, hidden = attention.embedding_attention_decoder(
-        target, decoder_initial_state, attention_states,
-        decoder_cell, batch_size, target_vocab_size,
-        output_size=None, output_projection=output_projection,
-        feed_previous=feed_previous, input_feeding=input_feeding,
-        attention_type=attention_type, dtype=dtype,
-        content_function=content_function,
-        output_attention=output_attention,
-        scope='decoder_with_attention', dropout=dropout,
-        decoder_states=decoder_states, step_num=step_num
-    )
-
-    return outputs, cell_state, hidden
-
-
 class Seq2SeqModel(object):
     """Sequence-to-sequence model with attention and for multiple buckets.
     This class implements a multi-layer recurrent neural network as encoder,
@@ -233,20 +122,22 @@ class Seq2SeqModel(object):
                  batch_size,
                  learning_rate,
                  learning_rate_decay_factor,
+                 decoder=None,
                  optimizer='sgd',
                  use_lstm=False,
                  input_feeding=False,
+                 combine_inp_attn=False,
                  dropout=0.0,
-                 attention_type='global',
-                 content_function='vinyals_kayser',
+                 attention_f=None,
+                 window_size=10,
+                 content_function=None,
+                 decoder_attention_f="None",
                  num_samples=512,
                  forward_only=False,
                  max_len=100,
                  cpu_only=False,
-                 output_attention="None",
                  early_stop_patience=0,
                  save_best_model=True,
-                 beam_size=12,
                  dtype=tf.float32):
         """Create the model.
         Args:
@@ -269,6 +160,8 @@ class Seq2SeqModel(object):
           num_samples: number of samples for sampled softmax.
           forward_only: if set, we do not construct the backward pass in the model.
         """
+        assert decoder is not None
+
         if cpu_only:
             device = "/cpu:0"
         else:
@@ -280,8 +173,18 @@ class Seq2SeqModel(object):
             self.target_vocab_size = target_vocab_size
             self.buckets = buckets
             self.batch_size = batch_size
-            self.attention_type = attention_type
+            self.attention_f = attention_f
             self.content_function = content_function
+            self.window_size = window_size
+
+            self.combine_inp_attn = combine_inp_attn
+
+            if decoder_attention_f == "None":
+                self.decoder_attention_f = None
+            else:
+                self.decoder_attention_f = decoder_attention_f
+
+            self.decoder = decoder
 
             # learning rate ops
             self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
@@ -323,11 +226,6 @@ class Seq2SeqModel(object):
 
             self.input_feeding = input_feeding
 
-            if output_attention == "None":
-                self.output_attention = None
-            else:
-                self.output_attention = output_attention
-
             self.max_len = max_len
             self.dropout = dropout
             self.dropout_feed = tf.placeholder(tf.float32, name="dropout_rate")
@@ -336,7 +234,6 @@ class Seq2SeqModel(object):
             self.dtype = dtype
 
             # If we use sampled softmax, we need an output projection.
-            self.output_projection = None
             loss_function = None
 
             with tf.device("/cpu:0"):
@@ -381,8 +278,8 @@ class Seq2SeqModel(object):
                     input_feeding=input_feeding)
 
             # The seq2seq function: we use embedding for the input and attention.
-            def seq2seq_f(encoder_inputs, decoder_inputs, do_decode):
-                return self.inference(encoder_inputs, decoder_inputs, do_decode)
+            def seq2seq_f(encoder_inputs, decoder_inputs):
+                return self.inference(encoder_inputs, decoder_inputs)
 
             # Feeds for inputs.
             self.encoder_inputs = []
@@ -400,6 +297,8 @@ class Seq2SeqModel(object):
             targets = [self.decoder_inputs[i + 1]
                        for i in xrange(len(self.decoder_inputs) - 1)]
 
+            self.decoder_states_holders = None
+
             # Training outputs and losses.
             if forward_only:
 
@@ -413,34 +312,34 @@ class Seq2SeqModel(object):
                 # context, decoder_initial_state, attention_states, input_length
                 self.ret0, self.ret1, self.ret2 = self.encode(self.encoder_inputs, b_size)
 
+                self.decoder_init_plcholder = tf.placeholder(tf.float32,
+                                                         shape=[None, (target_proj_size) * 2 * num_layers_decoder],
+                                                         name="decoder_init")
+
                 # shape of this placeholder: the first None indicate the batch size and the second the input length
                 self.attn_plcholder = tf.placeholder(tf.float32,
                                                      shape=[None, self.ret2.get_shape()[1], target_proj_size],
                                                      name="attention_states")
 
-                self.decoder_init_plcholder = tf.placeholder(tf.float32,
-                                                             shape=[None, (target_proj_size) * 2 * num_layers_decoder],
-                                                             name="decoder_init")
-
-                self.decoder_states_holders = None
                 # decoder_states = None
-                if self.output_attention:
+                if self.decoder_attention_f is not None:
                     self.decoder_states_holders = tf.placeholder(tf.float32, shape=[None, None, 1, decoder_size],
                                                                  name="decoder_state")
                 decoder_states = self.decoder_states_holders
 
-                self.logits, self.states, self.decoder_states = _decode(
-                    [self.decoder_inputs[0]], self.decoder_cell, self.decoder_init_plcholder, self.attn_plcholder,
-                    self.target_vocab_size, self.output_projection, batch_size=b_size, step_num=self.step_num,
-                    attention_type=self.attention_type, content_function=self.content_function,
-                    input_feeding=self.input_feeding, dtype=self.dtype, output_attention=self.output_attention,
-                    decoder_states=decoder_states
+                self.logits, self.states, self.decoder_states = decoder(
+                    decoder_inputs=[self.decoder_inputs[0]], initial_state=self.decoder_init_plcholder,
+                    attention_states=self.attn_plcholder, cell=self.decoder_cell,
+                    num_symbols=target_vocab_size, attention_f=attention_f,
+                    window_size=window_size, content_function=content_function,
+                    decoder_attention_f=decoder_attention_f, combine_inp_attn=combine_inp_attn,
+                    input_feeding=input_feeding, dropout=self.dropout_feed, initializer=None,
+                    decoder_states=decoder_states, step_num=self.step_num, dtype=dtype
                 )
 
                 # If we use output projection, we need to project outputs for decoding.
-                if self.output_projection is not None:
-                    self.logits = tf.nn.xw_plus_b(self.logits[-1], self.output_projection[0], self.output_projection[1])
-                    self.logits = nn_ops.softmax(self.logits)
+                self.logits = tf.nn.xw_plus_b(self.logits[-1], self.output_projection[0], self.output_projection[1])
+                self.logits = nn_ops.softmax(self.logits)
 
             else:
 
@@ -451,14 +350,14 @@ class Seq2SeqModel(object):
                     self.outputs, self.losses = seq2seq.model_with_buckets(
                         encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
                         targets=targets, weights=self.target_weights, num_symbols=self.target_vocab_size, buckets=buckets,
-                        seq2seq=lambda x, y: seq2seq_f(x, y, False), softmax_loss_function=loss_function)
+                        seq2seq=lambda x, y: seq2seq_f(x, y), softmax_loss_function=loss_function)
 
                 else:
 
                     self.outputs, self.losses = model_with_buckets(
                         encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
                         targets=targets, weights=self.target_weights, buckets=buckets,
-                        seq2seq_f=lambda x, y: seq2seq_f(x, y, False), softmax_loss_function=loss_function)
+                        seq2seq_f=lambda x, y: seq2seq_f(x, y), softmax_loss_function=loss_function)
 
             # Gradients and SGD update operation for training the model.
             params = tf.trainable_variables()
@@ -478,7 +377,7 @@ class Seq2SeqModel(object):
             self.saver = tf.train.Saver(tf.all_variables())
             self.saver_best = tf.train.Saver(tf.all_variables())
 
-    def inference(self, source, target, do_decode=False):
+    def inference(self, source, target):
         """
         Function to be used together with the 'model_with_buckets' function from Tensorflow's
             seq2seq module.
@@ -503,12 +402,15 @@ class Seq2SeqModel(object):
         context, decoder_initial_state, attention_states = self.encode(source, b_size)
 
         # decode target - note that we pass decoder_states as None when training the model
-        outputs, state, _ = _decode(target, self.decoder_cell, decoder_initial_state, attention_states,
-                                 self.target_vocab_size, self.output_projection, step_num=self.step_num,
-                                 batch_size=b_size, attention_type=self.attention_type,
-                                 feed_previous=do_decode, input_feeding=self.input_feeding,
-                                 content_function=self.content_function, dtype=self.dtype,
-                                 output_attention=self.output_attention, dropout=self.dropout_feed)
+        outputs, state, _ = self.decoder(
+            decoder_inputs=target, initial_state=decoder_initial_state,
+            attention_states=attention_states, cell=self.decoder_cell,
+            num_symbols=self.target_vocab_size, attention_f=self.attention_f,
+            window_size=self.window_size,  content_function=self.content_function,
+            decoder_attention_f=self.decoder_attention_f, combine_inp_attn=self.combine_inp_attn,
+            input_feeding=self.input_feeding,  dropout=self.dropout_feed,
+            initializer=None, decoder_states=None, step_num=self.step_num, dtype=self.dtype
+        )
 
         # return the output (logits) and internal states
         return outputs, state
@@ -520,7 +422,7 @@ class Seq2SeqModel(object):
         with tf.name_scope('reverse_encoder') as scope:
             if translate:
                 scope.reuse_variables()
-            context, decoder_initial_state = _reverse_encoder(
+            context, decoder_initial_state = encoders.reverse_encoder(
                     source, self.src_embedding, self.encoder_cell,
                     batch_size, dropout=self.dropout_feed, dtype=self.dtype)
 
@@ -758,7 +660,7 @@ class Seq2SeqModel(object):
                                   self.decoder_init_plcholder.name: decoder_init,
                                   self.attn_plcholder.name: attention_states}
             print ii
-            if self.output_attention:
+            if self.decoder_attention_f:
                 if ii == 1:
                     decoder_states = numpy.tile(decoder_states, (12, 1, 1, 1))
                 decoder_input_feed[self.decoder_states_holders.name] = decoder_states

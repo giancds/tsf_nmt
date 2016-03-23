@@ -33,7 +33,7 @@ import tensorflow as tf
 
 from train_ops import train_nmt
 from translate_ops import decode_from_stdin, decode_from_file
-import attention
+import decoders
 
 # flags related to the model optimization
 tf.app.flags.DEFINE_float('learning_rate', 1.0, 'Learning rate.')
@@ -52,7 +52,7 @@ tf.app.flags.DEFINE_integer('max_train_data_size', 0,
 # flags related to model architecture
 tf.app.flags.DEFINE_string('model', 'seq2seq', 'one of these 2 models: seq2seq or bidirectional')
 tf.app.flags.DEFINE_string('attention_type', 'local', 'Which type of attention to use. One of \'local\', \'global\' and \'hybrid\'.')
-tf.app.flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
+tf.app.flags.DEFINE_string('content_function', decoders.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 tf.app.flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
 tf.app.flags.DEFINE_boolean('input_feeding', True, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
 tf.app.flags.DEFINE_boolean('output_attention', False, 'Whether to pay attention on the decoder outputs. Default to False.')

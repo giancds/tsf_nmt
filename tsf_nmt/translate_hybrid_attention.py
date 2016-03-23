@@ -31,7 +31,7 @@ See the following papers for more information on neural translation models.
 from __future__ import print_function
 import tensorflow as tf
 
-import attention
+import decoders
 from train_ops import train_nmt
 from translate_ops import decode_from_stdin, decode_from_file
 
@@ -57,7 +57,7 @@ flags.DEFINE_boolean('cpu_only', False, 'Whether or not to use GPU only.')
 # flags related to model architecture
 flags.DEFINE_string('model', 'seq2seq', 'one of these models: seq2seq')
 flags.DEFINE_string('attention_type', 'hybrid', 'Which type of attention to use. One of local, global and hybrid.')
-flags.DEFINE_string('content_function', attention.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
+flags.DEFINE_string('content_function', decoders.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 flags.DEFINE_boolean('use_lstm', True, 'Whether to use LSTM units. Default to False.')
 flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
 flags.DEFINE_boolean('output_attention', True, 'Whether to pay attention on the decoder outputs. Default to False.')

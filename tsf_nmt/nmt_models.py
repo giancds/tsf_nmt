@@ -659,7 +659,7 @@ class Seq2SeqModel(object):
             decoder_input_feed = {self.decoder_inputs[0].name : decoder_inputs,
                                   self.decoder_init_plcholder.name: decoder_init,
                                   self.attn_plcholder.name: attention_states}
-            print ii
+            # print ii
             if self.decoder_attention_f:
                 if ii == 1:
                     decoder_states = numpy.tile(decoder_states, (12, 1, 1, 1))

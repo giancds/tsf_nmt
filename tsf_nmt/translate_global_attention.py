@@ -98,7 +98,7 @@ flags.DEFINE_integer('early_stop_after_epoch', 20, 'Start monitoring early_stop 
 flags.DEFINE_boolean('save_best_model', True, 'Set to True to save the best model even if not using early stop.')
 
 # decoding/testing flags
-flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
+flags.DEFINE_boolean('decode_file', True, 'Set to True for decoding sentences in a file.')
 flags.DEFINE_boolean('decode_input', False, 'Set to True for interactive decoding.')
 
 FLAGS = flags.FLAGS

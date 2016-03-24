@@ -30,9 +30,12 @@ See the following papers for more information on neural translation models.
 """
 from __future__ import print_function
 import tensorflow as tf
+from tensorflow.python.platform import gfile
 
 import content_functions
 import attention
+import nmt_models
+import decoders
 from train_ops import train_nmt
 from translate_ops import decode_from_stdin, decode_from_file
 
@@ -74,10 +77,10 @@ flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.'
 flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-flags.DEFINE_string('model_name', 'model_lstm_global_output_type2_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
+flags.DEFINE_string('model_name', 'model_lstm_global_output_type1_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
                            'Model name')
 flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_type2_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
+flags.DEFINE_string('train_dir', '/home/gian/train_global/model_lstm_global_output_type1_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
 flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
@@ -98,7 +101,7 @@ flags.DEFINE_integer('early_stop_after_epoch', 20, 'Start monitoring early_stop 
 flags.DEFINE_boolean('save_best_model', True, 'Set to True to save the best model even if not using early stop.')
 
 # decoding/testing flags
-flags.DEFINE_boolean('decode_file', True, 'Set to True for decoding sentences in a file.')
+flags.DEFINE_boolean('decode_file', False, 'Set to True for decoding sentences in a file.')
 flags.DEFINE_boolean('decode_input', False, 'Set to True for interactive decoding.')
 
 FLAGS = flags.FLAGS
@@ -109,6 +112,90 @@ FLAGS = flags.FLAGS
 _buckets = [(5, 10), (10, 15), (15, 20), (20, 25), (25, 30), (30, 35), (35, 40), (40, 45), (45, 50), (50, 50)]
 # _buckets = [(50, 50)]
 
+
+def create_nmt_model(session, forward_only, model_path=None, use_best=False, FLAGS=None, buckets=None, translate=False):
+    """Create translation model and initialize or load parameters in session."""
+
+    assert FLAGS is not None
+    assert buckets is not None
+
+    decode_input = FLAGS.decode_input
+    decode_file = FLAGS.decode_file
+
+    assert (decode_input is True and decode_file is False) \
+           or (decode_input is False and decode_file is True) \
+           or (decode_input is False and decode_file is False), \
+        'Cannot decode from input AND from file. Please choose just one option.'
+
+    # we should set batch to 1 when decoding
+    if decode_input or decode_file:
+        batch = 1
+    else:
+        batch = FLAGS.batch_size
+
+    dropout_rate = FLAGS.dropout
+
+    if translate:
+        dropout_rate = 0.0
+
+    if FLAGS.output_attention == "None":
+        decoder = decoders.attention_decoder
+    else:
+        decoder = decoders.attention_decoder_output
+
+    attention_f = attention.get_attention_f(FLAGS.attention_type)
+    content_function = content_functions.get_content_f(FLAGS.content_function)
+    decoder_attention_f = content_functions.get_decoder_content_f(FLAGS.output_attention)
+
+    model = nmt_models.Seq2SeqModel(source_vocab_size=FLAGS.src_vocab_size,
+                                    target_vocab_size=FLAGS.tgt_vocab_size,
+                                    buckets=buckets,
+                                    source_proj_size=FLAGS.proj_size,
+                                    target_proj_size=FLAGS.proj_size,
+                                    encoder_size=FLAGS.hidden_size,
+                                    decoder_size=FLAGS.hidden_size,
+                                    num_layers_encoder=FLAGS.num_layers,
+                                    num_layers_decoder=FLAGS.num_layers,
+                                    max_gradient_norm=FLAGS.max_gradient_norm,
+                                    batch_size=batch,
+                                    learning_rate=FLAGS.learning_rate,
+                                    learning_rate_decay_factor=FLAGS.learning_rate_decay_factor,
+                                    decoder=decoder,
+                                    optimizer=FLAGS.optimizer,
+                                    use_lstm=FLAGS.use_lstm,
+                                    input_feeding=FLAGS.input_feeding,
+                                    dropout=dropout_rate,
+                                    attention_f=attention_f,
+                                    window_size=FLAGS.window_size,
+                                    content_function=content_function,
+                                    decoder_attention_f=decoder_attention_f,
+                                    num_samples=FLAGS.num_samples_loss,
+                                    forward_only=forward_only,
+                                    max_len=FLAGS.max_len,
+                                    cpu_only=FLAGS.cpu_only,
+                                    early_stop_patience=FLAGS.early_stop_patience,
+                                    save_best_model=FLAGS.save_best_model)
+
+    if model_path is None:
+
+        if use_best:
+            ckpt = tf.train.get_checkpoint_state(FLAGS.best_models_dir)
+
+        else:
+            ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+
+        if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
+            print('Reading model parameters from %s' % ckpt.model_checkpoint_path)
+            model.saver.restore(session, ckpt.model_checkpoint_path)
+        else:
+            print('Created model with fresh parameters.')
+            session.run(tf.initialize_all_variables())
+
+    else:
+        print('Reading model parameters from %s' % model_path)
+        model.saver.restore(session, model_path)
+
+    return model
 
 def main(_):
 

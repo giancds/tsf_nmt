@@ -6,7 +6,6 @@ import os
 import tensorflow as tf
 import time
 import sys
-from tensorflow.python.platform import gfile
 import build_ops
 from data_utils import read_lm_data, read_nmt_data
 # from six.moves import xrange

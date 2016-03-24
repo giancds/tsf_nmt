@@ -17,9 +17,11 @@ from tensorflow.models.rnn import seq2seq
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
+
 import data_utils
+import cells
 import encoders
-import build_ops
+import optimization_ops
 from tensorflow.python.ops import variable_scope
 # from six.moves import xrange
 
@@ -141,24 +143,7 @@ class Seq2SeqModel(object):
                  dtype=tf.float32):
         """Create the model.
         Args:
-          source_vocab_size: size of the source vocabulary.
-          target_vocab_size: size of the target vocabulary.
-          buckets: a list of pairs (I, O), where I specifies maximum input length
-            that will be processed in that bucket, and O specifies maximum output
-            length. Training instances that have inputs longer than I or outputs
-            longer than O will be pushed to the next bucket and padded accordingly.
-            We assume that the list is sorted, e.g., [(2, 4), (8, 16)].
-          size: number of units in each layer of the model.
-          num_layers_encoder: number of layers in the model.
-          max_gradient_norm: gradients will be clipped to maximally this norm.
-          batch_size: the size of the batches used during training;
-            the model construction is independent of batch_size, so it can be
-            changed after initialization if this is convenient, e.g., for decoding.
-          learning_rate: learning rate to start with.
-          learning_rate_decay_factor: decay learning rate by this much when needed.
-          use_lstm: if true, we use LSTM cells instead of GRU cells.
-          num_samples: number of samples for sampled softmax.
-          forward_only: if set, we do not construct the backward pass in the model.
+
         """
         assert decoder is not None
 
@@ -272,7 +257,7 @@ class Seq2SeqModel(object):
                     )
 
             # Create the internal multi-layer cell for our RNN.
-            self.encoder_cell, self.decoder_cell = build_ops.build_nmt_multicell_rnn(
+            self.encoder_cell, self.decoder_cell = cells.build_nmt_multicell_rnn(
                     num_layers_encoder, num_layers_decoder, encoder_size, decoder_size,
                     source_proj_size, target_proj_size, use_lstm=use_lstm, dropout=dropout,
                     input_feeding=input_feeding)
@@ -365,7 +350,7 @@ class Seq2SeqModel(object):
                 self.gradient_norms = []
                 self.updates = []
                 # opt = tf.train.GradientDescentOptimizer(self.learning_rate)
-                opt = build_ops.get_optimizer(optimizer, learning_rate)
+                opt = optimization_ops.get_optimizer(optimizer, learning_rate)
                 for b in xrange(len(buckets)):
                     gradients = tf.gradients(self.losses[b], params)
                     clipped_gradients, norm = tf.clip_by_global_norm(gradients,
@@ -734,3 +719,40 @@ class Seq2SeqModel(object):
         sample_score = numpy.array(sample_score)[sidx]
 
         return sample.tolist(), sample_score.tolist()
+
+
+class NMT(object):
+
+
+    def __init__(self,
+                 source_vocab_size,
+                 target_vocab_size,
+                 buckets,
+                 source_proj_size,
+                 target_proj_size,
+                 encoder_size,
+                 decoder_size,
+                 num_layers_encoder,
+                 num_layers_decoder,
+                 max_gradient_norm,
+                 batch_size,
+                 learning_rate,
+                 learning_rate_decay_factor,
+                 decoder=None,
+                 optimizer='sgd',
+                 use_lstm=False,
+                 input_feeding=False,
+                 combine_inp_attn=False,
+                 dropout=0.0,
+                 attention_f=None,
+                 window_size=10,
+                 content_function=None,
+                 decoder_attention_f="None",
+                 num_samples=512,
+                 forward_only=False,
+                 max_len=100,
+                 cpu_only=False,
+                 early_stop_patience=0,
+                 save_best_model=True,
+                 dtype=tf.float32):
+        pass

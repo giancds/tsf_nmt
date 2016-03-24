@@ -24,25 +24,34 @@ def get_attention_f(name):
 
 def hybrid_attention(decoder_hidden_state, hidden_attn, initializer, window_size=10,
                      content_function=vinyals_kaiser, dtype=tf.float32):
-    """
+    """Put hybrid attention (mix of global and local attention) on hidden using decoder hidden states
+    and the hidden states of encoder (hidden_attn).
 
-    Parameters
-    ----------
-    decoder_hidden_state
-    hidden_features
-    va
-    hidden_attn
-    attention_vec_size
-    attn_length
-    attn_size
-    batch_size
-    window_size
-    content_function
-    last_layer_output
-    dtype
+        Parameters
+        ----------
+        decoder_hidden_state : 2-D Tensor
+            Tensor representing the current hidden state of the decoder (output of the recurrent layers).
+            Shape is (?, decoder_size).
+        hidden_attn : 4-D Tensor
+            Tensor representing the hidden states of the encoder (output of the recurrent layers). It has
+            shape (?, timesteps, 1, decoder_sdize) so it is possible to apply a 1-D convolution to calculate
+            the attention score more efficiently.
+        initializer : function
+            Function to use when initializing variables within the variables context.
+        window_size : int
+            Size of each side of the window to use when applying local attention. Not relevant to global
+            attention. Default to 10.
+        content_function : function
+            Content function to score the decoder hidden states and encoder hidden states to extract their
+            weights. Default to 'vinyals_kaiser'.
+        dtype : tensorflow dtype
+            Type of tensors. Default to tf.float32
 
-    Returns
-    -------
+        Returns
+        -------
+        ds : 2-D Tensor
+            Tensor representing the context vector generated after scoring the encoder and decoder hidden
+            states. Has shape (?, decoder_size), i.e., one context vector per batch sample.
 
     """
     assert content_function is not None
@@ -77,26 +86,35 @@ def hybrid_attention(decoder_hidden_state, hidden_attn, initializer, window_size
 def global_attention(decoder_hidden_state, hidden_attn, initializer, window_size=10,
                      content_function=vinyals_kaiser, dtype=tf.float32):
 
-    """
-    Put global attention masks on hidden using hidden_features and query.
+    """Put global attention on hidden using decoder hidden states and the hidden states of encoder (hidden_attn).
 
     Parameters
     ----------
-    decoder_hidden_state
-    hidden_features
-    va
-    hidden_attn
-    attention_vec_size
-    attn_length
-    attn_size
-    content_function
-    last_layer_output
+    decoder_hidden_state : 2-D Tensor
+        Tensor representing the current hidden state of the decoder (output of the recurrent layers).
+        Shape is (?, decoder_size).
+    hidden_attn : 4-D Tensor
+        Tensor representing the hidden states of the encoder (output of the recurrent layers). It has
+        shape (?, timesteps, 1, decoder_sdize) so it is possible to apply a 1-D convolution to calculate
+        the attention score more efficiently.
+    initializer : function
+        Function to use when initializing variables within the variables context.
+    window_size : int
+        Size of each side of the window to use when applying local attention. Not relevant to global
+        attention. Default to 10.
+    content_function : function
+        Content function to score the decoder hidden states and encoder hidden states to extract their
+        weights. Default to 'vinyals_kaiser'.
+    dtype : tensorflow dtype
+        Type of tensors. Default to tf.float32
 
     Returns
     -------
+    ds : 2-D Tensor
+        Tensor representing the context vector generated after scoring the encoder and decoder hidden
+        states. Has shape (?, decoder_size), i.e., one context vector per batch sample.
 
     """
-
     assert content_function is not None
 
     attention_vec_size = hidden_attn.get_shape()[3].value
@@ -118,26 +136,33 @@ def global_attention(decoder_hidden_state, hidden_attn, initializer, window_size
 
 def local_attention(decoder_hidden_state, hidden_attn, initializer, window_size=10,
                     content_function=vinyals_kaiser, dtype=tf.float32):
-    """
-    Put local attention masks on hidden using hidden_features and query.
+    """Put local attention on hidden using decoder hidden states and the hidden states of encoder (hidden_attn).
 
     Parameters
     ----------
-    decoder_hidden_state
-    hidden_features
-    va
-    hidden_attn
-    attention_vec_size
-    attn_length
-    attn_size
-    batch_size
-    window_size
-    content_function
-    last_layer_output
-    dtype
+    decoder_hidden_state : 2-D Tensor
+        Tensor representing the current hidden state of the decoder (output of the recurrent layers).
+        Shape is (?, decoder_size).
+    hidden_attn : 4-D Tensor
+        Tensor representing the hidden states of the encoder (output of the recurrent layers). It has
+        shape (?, timesteps, 1, decoder_sdize) so it is possible to apply a 1-D convolution to calculate
+        the attention score more efficiently.
+    initializer : function
+        Function to use when initializing variables within the variables context.
+    window_size : int
+        Size of each side of the window to use when applying local attention. Not relevant to global
+        attention. Default to 10.
+    content_function : function
+        Content function to score the decoder hidden states and encoder hidden states to extract their
+        weights. Default to 'vinyals_kaiser'.
+    dtype : tensorflow dtype
+        Type of tensors. Default to tf.float32
 
     Returns
     -------
+    ds : 2-D Tensor
+        Tensor representing the context vector generated after scoring the encoder and decoder hidden
+        states. Has shape (?, decoder_size), i.e., one context vector per batch sample.
 
     """
     assert content_function is not None

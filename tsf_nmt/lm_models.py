@@ -2,7 +2,6 @@
 """
 
 from __future__ import print_function
-import time
 import random
 import numpy
 import tensorflow as tf
@@ -10,7 +9,7 @@ from tensorflow.models.rnn import seq2seq, rnn
 from tensorflow.python.ops import array_ops, nn_ops
 
 import data_utils
-import build_ops
+import cells
 
 
 class LMModel(object):
@@ -49,7 +48,7 @@ class LMModel(object):
             self.targets.append(tf.placeholder(tf.int32, shape=[None], name="target{0}".format(i)))
             self.mask.append(tf.placeholder(tf.float32, shape=[None], name="mask{0}".format(i)))
 
-        self.cell = build_ops.build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=use_lstm, dropout=dropout_rate)
+        self.cell = cells.build_lm_multicell_rnn(num_layers, hidden_size, proj_size, use_lstm=use_lstm, dropout=dropout_rate)
 
         # self._initial_state = tf.placeholder(tf.float32, [None], name='initial_state')
 

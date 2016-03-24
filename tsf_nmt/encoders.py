@@ -6,12 +6,8 @@ from tensorflow.python.ops import embedding_ops
 from tensorflow.python.framework import ops
 
 
-def reverse_encoder(source,
-                     src_embedding,
-                     encoder_cell,
-                     batch_size,
-                     dropout=None,
-                     dtype=tf.float32):
+def reverse_encoder(source, src_embedding, encoder_cell, batch_size,
+                    dropout=None, dtype=tf.float32):
     """
 
     Parameters
@@ -54,3 +50,8 @@ def reverse_encoder(source,
         decoder_initial_state = state
 
     return hidden_states, decoder_initial_state
+
+
+def bidirectional_encoder(source, src_embedding, encoder_cell, batch_size,
+                          dropout=None, dtype=tf.float32):
+    pass

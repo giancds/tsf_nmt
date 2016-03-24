@@ -334,8 +334,8 @@ class Seq2SeqModel(object):
 
                     self.outputs, self.losses = seq2seq.model_with_buckets(
                         encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
-                        targets=targets, weights=self.target_weights, num_symbols=self.target_vocab_size, buckets=buckets,
-                        seq2seq=lambda x, y: seq2seq_f(x, y), softmax_loss_function=loss_function)
+                        targets=targets, weights=self.target_weights, num_decoder_symbols=self.target_vocab_size,
+                        buckets=buckets, seq2seq=lambda x, y: seq2seq_f(x, y), softmax_loss_function=loss_function)
 
                 else:
 

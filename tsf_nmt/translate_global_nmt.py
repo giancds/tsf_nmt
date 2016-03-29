@@ -42,7 +42,7 @@ from translate_ops import decode_from_stdin, decode_from_file
 flags = tf.flags
 
 # flags related to the model optimization
-flags.DEFINE_float('learning_rate', 0.0001, 'Learning rate.')
+flags.DEFINE_float('learning_rate', 0.001, 'Learning rate.')
 flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by this much. Setting it to 1.0 will not affect the learning rate.')
 flags.DEFINE_integer('start_decay', 0, 'Start learning rate decay at this epoch. Set to 0 to use patience.')
 flags.DEFINE_integer('stop_decay', 0, 'Stop learning rate decay at this epoch. Set to 0 to use patience.')
@@ -59,16 +59,16 @@ flags.DEFINE_integer('max_train_data_size', 0, 'Limit on the size of training da
 flags.DEFINE_boolean('cpu_only', False, 'Whether or not to use GPU only.')
 
 # flags related to model architecture
-flags.DEFINE_string('model', 'seq2seq', 'one of these models: seq2seq')
+flags.DEFINE_string('model', 'nmt', 'one of these models: seq2seq or nmt')
 flags.DEFINE_string('attention_type', attention.GLOBAL, 'Which type of attention to use. One of local, global and hybrid.')
 flags.DEFINE_integer('window_size', 10, 'Size of each size of the window to use when applying local attention. Not relevant to global attention')
-flags.DEFINE_string('content_function', content_functions.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
+flags.DEFINE_string('content_function', content_functions.BAHDANAU_NMT, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 flags.DEFINE_boolean('use_lstm', False, 'Whether to use LSTM units. Default to False.')
 flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
-flags.DEFINE_string('output_attention', content_functions.DECODER_TYPE_2, 'Whether to pay attention on the decoder outputs. Default to False.')
+flags.DEFINE_string('output_attention', 'None', 'Whether to pay attention on the decoder outputs. Default to False.')
 flags.DEFINE_integer('proj_size', 500, 'Size of words projection.')
 flags.DEFINE_integer('hidden_size', 500, 'Size of each layer.')
-flags.DEFINE_integer('num_layers', 2, 'Number of layers in each component of the model.')
+flags.DEFINE_integer('num_layers', 1, 'Number of layers in each component of the model.')
 
 flags.DEFINE_float('dropout', 0.0, 'Dropout rate. When the value is 0.0 dropout is turned off. Optimal should be 0.2 as indicated by Zaremba et al. (2014)')
 
@@ -77,10 +77,10 @@ flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.'
 flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-flags.DEFINE_string('model_name', 'seq2seq_gru_global_output_type2_vinyals_2lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
+flags.DEFINE_string('model_name', 'model_nmt_global_output_None_bahdanau_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
                            'Model name')
 flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-flags.DEFINE_string('train_dir', '/home/gian/train_global/seq2seq_gru_global_output_type2_vinyals_2lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
+flags.DEFINE_string('train_dir', '/home/gian/train_global/model_nmt_global_output_none_bahdanau_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
 flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
@@ -110,6 +110,8 @@ FLAGS = flags.FLAGS
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 # _buckets = [(5, 10), (10, 15), (20, 25), (40, 50), (50, 50)]
 _buckets = [(5, 10), (10, 15), (15, 20), (20, 25), (25, 30), (30, 35), (35, 40), (40, 45), (45, 50), (50, 50)]
+# _buckets = [(50, 50)]
+
 
 def main(_):
 

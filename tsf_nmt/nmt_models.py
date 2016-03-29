@@ -17,12 +17,14 @@ from tensorflow.models.rnn import seq2seq
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import variable_scope
 
 import data_utils
 import cells
 import encoders
 import optimization_ops
-from tensorflow.python.ops import variable_scope
+from decoders import attention_decoder_nmt
+
 # from six.moves import xrange
 
 
@@ -259,7 +261,7 @@ class Seq2SeqModel(object):
             # Create the internal multi-layer cell for our RNN.
             self.encoder_cell, self.decoder_cell = cells.build_nmt_multicell_rnn(
                     num_layers_encoder, num_layers_decoder, encoder_size, decoder_size,
-                    source_proj_size, target_proj_size, use_lstm=use_lstm, dropout=dropout,
+                    source_proj_size, use_lstm=use_lstm, dropout=dropout,
                     input_feeding=input_feeding)
 
             # The seq2seq function: we use embedding for the input and attention.
@@ -721,8 +723,7 @@ class Seq2SeqModel(object):
         return sample.tolist(), sample_score.tolist()
 
 
-class NMT(object):
-
+class NMTModel(object):
 
     def __init__(self,
                  source_vocab_size,
@@ -732,15 +733,11 @@ class NMT(object):
                  target_proj_size,
                  encoder_size,
                  decoder_size,
-                 num_layers_encoder,
-                 num_layers_decoder,
                  max_gradient_norm,
                  batch_size,
                  learning_rate,
                  learning_rate_decay_factor,
-                 decoder=None,
                  optimizer='sgd',
-                 use_lstm=False,
                  input_feeding=False,
                  combine_inp_attn=False,
                  dropout=0.0,
@@ -755,4 +752,271 @@ class NMT(object):
                  early_stop_patience=0,
                  save_best_model=True,
                  dtype=tf.float32):
-        pass
+
+        if cpu_only:
+            device = "/cpu:0"
+        else:
+            device = "/gpu:0"
+
+        with tf.device(device):
+
+            self.source_vocab_size = source_vocab_size
+            self.target_vocab_size = target_vocab_size
+            self.buckets = buckets
+            self.batch_size = batch_size
+            self.attention_f = attention_f
+            self.content_function = content_function
+            self.window_size = window_size
+
+            self.combine_inp_attn = combine_inp_attn
+
+            if decoder_attention_f == "None":
+                self.decoder_attention_f = None
+            else:
+                self.decoder_attention_f = decoder_attention_f
+
+            # learning rate ops
+            self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
+            self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
+
+            # epoch ops
+            self.epoch = tf.Variable(0, trainable=False)
+            self.epoch_update_op = self.epoch.assign(self.epoch + 1)
+
+            # samples seen ops
+            self.samples_seen = tf.Variable(0, trainable=False)
+            self.samples_seen_update_op = self.samples_seen.assign(self.samples_seen + batch_size)
+            self.samples_seen_reset_op = self.samples_seen.assign(0)
+
+            # global step variable - controled by the model
+            self.global_step = tf.Variable(0.0, trainable=False)
+
+            # average loss ops
+            self.current_loss = tf.Variable(0.0, trainable=False)
+            self.current_loss_update_op = None
+            self.avg_loss = tf.Variable(0.0, trainable=False)
+            self.avg_loss_update_op = self.avg_loss.assign(tf.div(self.current_loss, self.global_step))
+
+            if early_stop_patience > 0 or save_best_model:
+                self.best_eval_loss = tf.Variable(numpy.inf, trainable=False)
+                self.estop_counter = tf.Variable(0, trainable=False)
+                self.estop_counter_update_op = self.estop_counter.assign(self.estop_counter + 1)
+                self.estop_counter_reset_op = self.estop_counter.assign(0)
+            else:
+                self.best_eval_loss = None
+                self.estop_counter = None
+                self.estop_counter_update_op = None
+                self.estop_counter_reset_op = None
+
+            self.source_proj_size = source_proj_size
+            self.target_proj_size = target_proj_size
+            self.encoder_size = encoder_size
+            self.decoder_size = decoder_size
+
+            self.input_feeding = input_feeding
+
+            self.max_len = max_len
+            self.dropout = dropout
+            self.dropout_feed = tf.placeholder(tf.float32, name="dropout_rate")
+            self.step_num = tf.Variable(0, trainable=False)
+
+            self.dtype = dtype
+
+            # If we use sampled softmax, we need an output projection.
+            loss_function = None
+
+            with tf.device("/cpu:0"):
+                w = tf.get_variable("proj_w", [decoder_size, self.target_vocab_size])
+                w_t = tf.transpose(w)
+                b = tf.get_variable("proj_b", [self.target_vocab_size])
+            self.output_projection = (w, b)
+
+            # Sampled softmax only makes sense if we sample less than vocabulary size.
+            if 0 < num_samples < self.target_vocab_size:
+                def sampled_loss(inputs, labels):
+                    with tf.device("/cpu:0"):
+                        labels = tf.reshape(labels, [-1, 1])
+                        return tf.nn.sampled_softmax_loss(w_t, b, inputs, labels, num_samples,
+                                                          self.target_vocab_size)
+
+                loss_function = sampled_loss
+
+            # create the embedding matrix - this must be done in the CPU for now
+            with tf.device("/cpu:0"):
+                self.src_embedding = tf.Variable(
+                    tf.truncated_normal(
+                        [source_vocab_size, source_proj_size], stddev=0.01
+                    ),
+                    name='embedding_src'
+                )
+
+                # decoder with attention
+                with tf.name_scope('decoder_with_attention') as scope:
+                    # create this variable to be used inside the embedding_attention_decoder
+                    self.tgt_embedding = tf.Variable(
+                        tf.truncated_normal(
+                            [target_vocab_size, target_proj_size], stddev=0.01
+                        ),
+                        name='embedding'
+                    )
+
+            # Create the internal multi-layer cell for our RNN.
+            self.encoder_cell_fw, self.encoder_cell_bw, self.decoder_cell = cells.build_nmt_bidirectional_cell(
+                encoder_size, decoder_size, source_proj_size, target_proj_size, dropout=dropout)
+
+            # The seq2seq function: we use embedding for the input and attention.
+            def seq2seq_f(encoder_inputs, decoder_inputs):
+                return self.inference(encoder_inputs, decoder_inputs)
+
+            # Feeds for inputs.
+            self.encoder_inputs = []
+            self.decoder_inputs = []
+            self.target_weights = []
+
+            for i in xrange(buckets[-1][0]):  # Last bucket is the biggest one.
+                self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
+
+            for i in xrange(buckets[-1][1] + 1):
+                self.decoder_inputs.append(tf.placeholder(tf.int32, shape=[None, ], name="decoder{0}".format(i)))
+                self.target_weights.append(tf.placeholder(tf.float32, shape=[None], name="weight{0}".format(i)))
+
+            # Our targets are decoder inputs shifted by one.
+            targets = [self.decoder_inputs[i + 1]
+                       for i in xrange(len(self.decoder_inputs) - 1)]
+
+            self.decoder_states_holders = None
+
+            # Training outputs and losses.
+            if forward_only:
+
+                # self.batch_size = beam_size
+
+                for i in xrange(len(self.encoder_inputs), self.max_len):
+                    self.encoder_inputs.append(tf.placeholder(tf.int32, shape=[None], name="encoder{0}".format(i)))
+
+                b_size = array_ops.shape(self.encoder_inputs[0])[0]
+
+                # context, decoder_initial_state, attention_states, input_length
+                self.ret0, self.ret1, self.ret2 = self.encode(self.encoder_inputs, b_size)
+
+                self.decoder_init_plcholder = tf.placeholder(tf.float32,
+                                                             shape=[None, (target_proj_size) * 2],
+                                                             name="decoder_init")
+
+                # shape of this placeholder: the first None indicate the batch size and the second the input length
+                self.attn_plcholder = tf.placeholder(tf.float32,
+                                                     shape=[None, self.ret2.get_shape()[1], target_proj_size],
+                                                     name="attention_states")
+
+                # decoder_states = None
+                if self.decoder_attention_f is not None:
+                    self.decoder_states_holders = tf.placeholder(tf.float32, shape=[None, None, 1, decoder_size],
+                                                                 name="decoder_state")
+                decoder_states = self.decoder_states_holders
+
+                self.logits, self.states = attention_decoder_nmt(
+                    decoder_inputs=[self.decoder_inputs[0]], initial_state=self.decoder_init_plcholder,
+                    attention_states=self.attn_plcholder, cell=self.decoder_cell,
+                    num_symbols=target_vocab_size, attention_f=attention_f,
+                    window_size=window_size, content_function=content_function,
+                    decoder_attention_f=decoder_attention_f, combine_inp_attn=combine_inp_attn,
+                    input_feeding=input_feeding, dropout=self.dropout_feed, initializer=None,
+                    dtype=dtype
+                )
+
+                # If we use output projection, we need to project outputs for decoding.
+                self.logits = tf.nn.xw_plus_b(self.logits[-1], self.output_projection[0], self.output_projection[1])
+                self.logits = nn_ops.softmax(self.logits)
+
+            else:
+
+                tf_version = pkg_resources.get_distribution("tensorflow").version
+
+                if tf_version == "0.6.0" or tf_version == "0.5.0":
+
+                    self.outputs, self.losses = seq2seq.model_with_buckets(
+                        encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
+                        targets=targets, weights=self.target_weights, num_decoder_symbols=self.target_vocab_size,
+                        buckets=buckets, seq2seq=lambda x, y: seq2seq_f(x, y), softmax_loss_function=loss_function)
+
+                else:
+
+                    self.outputs, self.losses = model_with_buckets(
+                        encoder_inputs=self.encoder_inputs, decoder_inputs=self.decoder_inputs,
+                        targets=targets, weights=self.target_weights, buckets=buckets,
+                        seq2seq_f=lambda x, y: seq2seq_f(x, y), softmax_loss_function=loss_function)
+
+            # Gradients and SGD update operation for training the model.
+            params = tf.trainable_variables()
+            if not forward_only:
+                self.gradient_norms = []
+                self.updates = []
+                # opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+                opt = optimization_ops.get_optimizer(optimizer, learning_rate)
+                for b in xrange(len(buckets)):
+                    gradients = tf.gradients(self.losses[b], params)
+                    clipped_gradients, norm = tf.clip_by_global_norm(gradients,
+                                                                     max_gradient_norm)
+                    self.gradient_norms.append(norm)
+                    self.updates.append(opt.apply_gradients(
+                        zip(clipped_gradients, params), global_step=self.global_step))
+
+            self.saver = tf.train.Saver(tf.all_variables())
+            self.saver_best = tf.train.Saver(tf.all_variables())
+
+    def inference(self, source, target):
+        """
+        Function to be used together with the 'model_with_buckets' function from Tensorflow's
+            seq2seq module.
+
+        Parameters
+        ----------
+        source: Tensor
+            a Tensor corresponding to the source sentence
+        target: Tensor
+            A Tensor corresponding to the target sentence
+        do_decode: boolean
+            Flag indicating whether or not to use the feed_previous parameter of the
+                seq2seq.embedding_attention_decoder function.
+
+        Returns
+        -------
+
+        """
+        b_size = array_ops.shape(source[0])[0]
+
+        # encode source
+        context, decoder_initial_state, attention_states = self.encode(source, b_size)
+
+        # decode target - note that we pass decoder_states as None when training the model
+        outputs, state = attention_decoder_nmt(
+            decoder_inputs=target, initial_state=decoder_initial_state,
+            attention_states=attention_states, cell=self.decoder_cell,
+            num_symbols=self.target_vocab_size, attention_f=self.attention_f,
+            window_size=self.window_size, content_function=self.content_function,
+            decoder_attention_f=self.decoder_attention_f, combine_inp_attn=self.combine_inp_attn,
+            input_feeding=self.input_feeding, dropout=self.dropout_feed,
+            initializer=None, dtype=self.dtype
+        )
+
+        # return the output (logits) and internal states
+        return outputs, state
+
+    def encode(self, source, batch_size, translate=False):
+
+        # encoder embedding layer and recurrent layer
+        # with tf.name_scope('bidirectional_encoder') as scope:
+        with tf.name_scope('reverse_encoder') as scope:
+            if translate:
+                scope.reuse_variables()
+            context, decoder_initial_state = encoders.bidirectional_encoder(
+                source, self.src_embedding, self.encoder_cell_fw, self.encoder_cell_bw,
+                dropout=self.dropout_feed, dtype=self.dtype)
+
+            # First calculate a concatenation of encoder outputs to put attention on.
+            top_states = [
+                tf.reshape(e, [-1, 1, self.encoder_size * 2]) for e in context
+                ]
+            attention_states = tf.concat(1, top_states)
+
+        return context, decoder_initial_state, attention_states

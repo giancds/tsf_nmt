@@ -12,6 +12,7 @@ LUONG_GENERAL = 'luong_general'
 LUONG_DOT = 'luong_dot'
 MOD_VINYALS_KAISER = 'modified_vinyals_kayser'
 MOD_BAHDANAU = 'modified_bahdanau'
+BAHDANAU_NMT = 'bahdanau_nmt'
 DECODER_TYPE_1 = 'decoder_type_1'
 DECODER_TYPE_2 = 'decoder_type_2'
 
@@ -32,6 +33,8 @@ def get_content_f(name):
         return mod_bahdanau
     elif name == MOD_VINYALS_KAISER:
         return mod_vinyals_kayser
+    elif name == BAHDANAU_NMT:
+        return bahdanau_nmt
     else:
         return mod_vinyals_kayser
 
@@ -58,6 +61,26 @@ def decoder_type_2(decoder_hidden, attn_size, initializer=None):
 
         # s will be (?, timesteps)
         s = math_ops.reduce_sum((v * math_ops.tanh(hidden_features)), [2, 3])
+
+    return s
+
+
+def bahdanau_nmt(hidden, decoder_previous_state, initializer=None):
+    # size of decoder layers
+    attention_vec_size = hidden.get_shape()[3].value
+    decoder_size = decoder_previous_state.get_shape()[1].value
+
+    with vs.variable_scope("bahdanau_nmt", initializer=initializer):
+        # here we calculate the W_a * s_i-1 (W1 * h_1) part of the attention alignment
+        k = vs.get_variable("AttnW_%d" % 0, [1, 1, attention_vec_size, attention_vec_size], initializer=initializer)
+        hidden_features = nn_ops.conv2d(hidden, k, [1, 1, 1, 1], "SAME")
+        va = vs.get_variable("AttnV_%d" % 0, [attention_vec_size], initializer=initializer)
+
+        y = cells.linear(decoder_previous_state, decoder_size, True)
+        y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
+
+        # Attention mask is a softmax of v^T * tanh(...).
+        s = math_ops.reduce_sum(va * math_ops.tanh(hidden_features + y), [2, 3])
 
     return s
 

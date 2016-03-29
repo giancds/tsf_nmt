@@ -8,7 +8,7 @@ import time
 from tensorflow.python.platform import gfile
 
 import data_utils
-from build_ops import create_nmt_model
+from build_ops import create_seq2seq_model
 
 
 def decode_from_file(files, model_path=None, use_best=False, get_ids=True, FLAGS=None, buckets=None):
@@ -19,9 +19,9 @@ def decode_from_file(files, model_path=None, use_best=False, get_ids=True, FLAGS
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
 
         # load model parameters.
-        model = create_nmt_model(sess, model_path=model_path, forward_only=True,
-                                 use_best=use_best, FLAGS=FLAGS, buckets=buckets,
-                                 translate=True)
+        model = create_seq2seq_model(sess, model_path=model_path, forward_only=True,
+                                     use_best=use_best, FLAGS=FLAGS, buckets=buckets,
+                                     translate=True)
 
         # Load vocabularies.
         source_vocab_file = FLAGS.data_dir + \
@@ -101,7 +101,7 @@ def decode_from_stdin(show_all_n_best=False, FLAGS=None, buckets=None):
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
 
         # Create model and load parameters.
-        model = create_nmt_model(sess, True, FLAGS, buckets, translate=True)
+        model = create_seq2seq_model(sess, True, FLAGS, buckets, translate=True)
 
         # Load vocabularies.
         source_vocab_file = FLAGS.data_dir + \

@@ -22,7 +22,6 @@ py_library(
         ":data_utils",
         ":decoders",
         ":encoders",
-        ":lm_models",
         ":nmt_models",
         ":train_ops",
         ":translate_ops"
@@ -53,7 +52,6 @@ py_library(
         ":attention",
         ":content_functions",
         ":decoders",
-        ":lm_models",
         ":nmt_models",
     ],
 )
@@ -116,19 +114,6 @@ py_library(
     ],
 )
 
-# lm_models.py
-py_library(
-    name = "lm_models",
-    srcs = [
-        "lm_models.py",
-    ],
-    srcs_version = "PY2AND3",
-    deps = [
-        ":cells",
-        ":data_utils",
-    ],
-)
-
 # nmt_models.py
 py_library(
     name = "nmt_models",
@@ -155,17 +140,6 @@ py_library(
     ],
 )
 
-# train_lm.py
-py_library(
-    name = "train_lm",
-    srcs = [
-        "train_lm.py",
-    ],
-    srcs_version = "PY2AND3",
-    deps = [
-        ":train_ops",
-    ],
-)
 
 # train_ops.py
 py_library(

@@ -10,7 +10,6 @@ from tsf_nmt import content_functions
 from tsf_nmt import data_utils
 from tsf_nmt import decoders
 from tsf_nmt import encoders
-from tsf_nmt import lm_models
 from tsf_nmt import nmt_models
 from tsf_nmt import train_ops
 from tsf_nmt import translate_ops

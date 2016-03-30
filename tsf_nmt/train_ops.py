@@ -2,6 +2,7 @@
 import data_utils
 import math
 import numpy
+import random
 import os
 import tensorflow as tf
 import time

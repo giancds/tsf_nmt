@@ -284,10 +284,10 @@ def build_nmt_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size
                             dropout=0.0):
 
         if use_lstm:
-            print("I'm building the models with LSTM cells")
+            print("I'm building the model with LSTM cells")
             cell_class = rnn_cell.LSTMCell
         else:
-            print("I'm building the models with GRU cells")
+            print("I'm building the model with GRU cells")
             cell_class = GRUCell
 
         initializer = tf.random_uniform_initializer(minval=-0.1, maxval=0.1, seed=1234)

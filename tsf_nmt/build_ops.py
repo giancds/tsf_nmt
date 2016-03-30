@@ -34,9 +34,15 @@ def create_seq2seq_model(session, forward_only, model_path=None, use_best=False,
         dropout_rate = 0.0
 
     if FLAGS.output_attention == "None":
-        decoder = decoders.attention_decoder
+        if FLAGS.informed_decoder:
+            decoder = decoders.attention_decoder_informed
+        else:
+            decoder = decoders.attention_decoder
     else:
-        decoder = decoders.attention_decoder_output
+        if FLAGS.informed_decoder:
+            decoder = decoders.attention_decoder_output_informed
+        else:
+            decoder = decoders.attention_decoder_output
 
     attention_f = attention.get_attention_f(FLAGS.attention_type)
     content_function = content_functions.get_content_f(FLAGS.content_function)

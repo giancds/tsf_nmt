@@ -51,7 +51,7 @@ flags.DEFINE_string('optimizer', 'adam', 'Name of the optimizer to use (adagrad,
 flags.DEFINE_float('max_gradient_norm', 5.0, 'Clip gradients to this norm.')
 flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
 flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
-flags.DEFINE_integer('num_samples_loss', 0, 'Number of samples to use in sampled softmax. Set to 0 to use regular loss.')
+flags.DEFINE_integer('num_samples_loss', 512, 'Number of samples to use in sampled softmax. Set to 0 to use regular loss.')
 flags.DEFINE_integer('max_len', 120, 'Max size of the beam used for decoding.')
 flags.DEFINE_integer('max_epochs', 23,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
 flags.DEFINE_integer('max_train_data_size', 0, 'Limit on the size of training data (0: no limit).')
@@ -65,10 +65,11 @@ flags.DEFINE_integer('window_size', 10, 'Size of each size of the window to use 
 flags.DEFINE_string('content_function', content_functions.VINYALS_KAISER, 'Type of content-based function to define the attention. One of vinyals_kayser, luong_general and luong_dot')
 flags.DEFINE_boolean('use_lstm', False, 'Whether to use LSTM units. Default to False.')
 flags.DEFINE_boolean('input_feeding', False, 'Whether to input the attention states as part of input to the decoder at each timestep. Default to False.')
+flags.DEFINE_boolean('informed_decoder', True, 'Whether to use the previous word embedding info to the softmax. Default to False.')
 flags.DEFINE_string('output_attention', content_functions.DECODER_TYPE_2, 'Whether to pay attention on the decoder outputs. Default to False.')
 flags.DEFINE_integer('proj_size', 500, 'Size of words projection.')
 flags.DEFINE_integer('hidden_size', 500, 'Size of each layer.')
-flags.DEFINE_integer('num_layers', 2, 'Number of layers in each component of the model.')
+flags.DEFINE_integer('num_layers', 1, 'Number of layers in each component of the model.')
 
 flags.DEFINE_float('dropout', 0.0, 'Dropout rate. When the value is 0.0 dropout is turned off. Optimal should be 0.2 as indicated by Zaremba et al. (2014)')
 
@@ -77,10 +78,10 @@ flags.DEFINE_integer('src_vocab_size', 30000, 'Source language vocabulary size.'
 flags.DEFINE_integer('tgt_vocab_size', 30000, 'Target vocabulary size.')
 
 # information about the datasets and their location
-flags.DEFINE_string('model_name', 'seq2seq_gru_global_output_type2_vinyals_2lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
+flags.DEFINE_string('model_name', 'seq2seq_gru_global_informed_output_type2_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att.ckpt',
                            'Model name')
 flags.DEFINE_string('data_dir', '/home/gian/data/', 'Data directory')
-flags.DEFINE_string('train_dir', '/home/gian/train_global/seq2seq_gru_global_output_type2_vinyals_2lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
+flags.DEFINE_string('train_dir', '/home/gian/train_global/seq2seq_gru_global_informed_output_type2_vinyals_1lr_hid500_proj500_en30000_pt30000_maxNrm5_adam_dropout-off_input-feed-off_att/', 'Train directory')
 flags.DEFINE_string('best_models_dir', '/home/gian/train_global/', 'Train directory')
 flags.DEFINE_string('train_data', 'fapesp-v2.pt-en.train.tok.%s', 'Data for training.')
 flags.DEFINE_string('valid_data', 'fapesp-v2.pt-en.dev.tok.%s', 'Data for validation.')
@@ -90,7 +91,7 @@ flags.DEFINE_string('source_lang', 'en', 'Source language extension.')
 flags.DEFINE_string('target_lang', 'pt', 'Target language extension.')
 
 # verbosity and checkpoints
-flags.DEFINE_integer('steps_per_checkpoint', 500, 'How many training steps to do per checkpoint.')
+flags.DEFINE_integer('steps_per_checkpoint', 100, 'How many training steps to do per checkpoint.')
 flags.DEFINE_integer('steps_per_validation', 1000, 'How many training steps to do between each validation.')
 flags.DEFINE_integer('steps_verbosity', 10, 'How many training steps to do between each information print.')
 
@@ -110,6 +111,7 @@ FLAGS = flags.FLAGS
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 # _buckets = [(5, 10), (10, 15), (20, 25), (40, 50), (50, 50)]
 _buckets = [(5, 10), (10, 15), (15, 20), (20, 25), (25, 30), (30, 35), (35, 40), (40, 45), (45, 50), (50, 50)]
+
 
 def main(_):
 

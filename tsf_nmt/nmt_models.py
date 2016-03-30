@@ -98,7 +98,338 @@ def model_with_buckets(encoder_inputs, decoder_inputs, targets, weights,
     return outputs, losses
 
 
-class Seq2SeqModel(object):
+class TranslationModel(object):
+
+    def __init__(self):
+        self.buckets = []
+        self.encoder_inputs = []
+        self.decoder_inputs = []
+        self.target_weights = []
+        self.dropout_feed = None
+        self.updates = None
+        self.gradient_norms = None
+        self.losses = None
+        self.dropout = 0.0
+        self.max_len = 120
+        self.batch_size = 32
+        self.ret0, self.ret1, self.ret2 = [], [], []
+        self.decoder_size = 100
+        self.logits, self.states, self.decoder_states = [], [], []
+        self.step_num = None
+        self.decoder_init_plcholder = None
+        self.attn_plcholder = None
+        self.decoder_states_holders = None
+        self.decoder_attention_f = None
+
+    def inference(self, source, target):
+        raise NotImplementedError
+
+    def encode(self, source, batch_size, translate=False):
+        raise NotImplementedError
+
+    def get_train_batch(self, data, bucket_id, batch_size=None):
+        """Get a random batch of data from the specified bucket, prepare for step.
+        To feed data in step(..) it must be a list of batch-major vectors, while
+        data here contains single length-major cases. So the main logic of this
+        function is to re-index data cases to be in the proper format for feeding.
+        Args:
+          data: a tuple of size len(self.buckets) in which each element contains
+            lists of pairs of input and output data that we use to create a batch.
+          bucket_id: integer, which bucket to get the batch for.
+        Returns:
+          The triple (encoder_inputs, decoder_inputs, target_weights) for
+          the constructed batch that has the proper format to call step(...) later.
+        """
+        encoder_size, decoder_size = self.buckets[bucket_id]
+        encoder_inputs, decoder_inputs = [], []
+
+        n_target_words = 0
+        #
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        # Get a random batch of encoder and decoder inputs from data,
+        # pad them if needed, reverse encoder inputs and add GO to decoder.
+        for _ in xrange(batch_size):
+            # encoder_input, _, decoder_input = random.choice(d)
+            encoder_input, decoder_input = random.choice(data[bucket_id])
+
+            # Encoder inputs are padded and then reversed.
+            encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
+            encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+
+            n_target_words += len(decoder_input)
+
+            # Decoder inputs get an extra "GO" symbol, and are padded then.
+            decoder_pad_size = decoder_size - len(decoder_input) - 1
+            decoder_inputs.append([data_utils.GO_ID] + decoder_input +
+                                  [data_utils.PAD_ID] * decoder_pad_size)
+
+        # Now we create batch-major vectors from the data selected above.
+        batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
+
+        # Batch encoder inputs are just re-indexed encoder_inputs.
+        for length_idx in xrange(encoder_size):
+            batch_encoder_inputs.append(
+                numpy.array([encoder_inputs[batch_idx][length_idx]
+                             for batch_idx in xrange(batch_size)], dtype=numpy.int32))
+
+        # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
+        for length_idx in xrange(decoder_size):
+            batch_decoder_inputs.append(
+                numpy.array([decoder_inputs[batch_idx][length_idx]
+                             for batch_idx in xrange(batch_size)], dtype=numpy.int32))
+
+            # Create target_weights to be 0 for targets that are padding.
+            # batch_weight = numpy.ones(self.batch_size, dtype=numpy.float32)
+            batch_weight = numpy.ones(batch_size, dtype=numpy.float32)
+            # for batch_idx in xrange(self.batch_size):
+            for batch_idx in xrange(batch_size):
+                # We set weight to 0 if the corresponding target is a PAD symbol.
+                # The corresponding target is decoder_input shifted by 1 forward.
+                if length_idx < decoder_size - 1:
+                    target = decoder_inputs[batch_idx][length_idx + 1]
+                if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
+                    batch_weight[batch_idx] = 0.0
+            batch_weights.append(batch_weight)
+
+        return batch_encoder_inputs, batch_decoder_inputs, batch_weights, n_target_words
+
+    def train_step(self, session, encoder_inputs, decoder_inputs, target_weights, bucket_id, validation_step=False):
+        """Run a step of the model feeding the given inputs.
+        Args:
+          session: tensorflow session to use.
+          encoder_inputs: list of numpy int vectors to feed as encoder inputs.
+          decoder_inputs: list of numpy int vectors to feed as decoder inputs.
+          target_weights: list of numpy float vectors to feed as target weights.
+          bucket_id: which bucket of the model to use.
+          validation_step: whether to do the backward step or only forward.
+          softmax: whether to apply softmax to the output_logits before returning them
+        Returns:
+          A triple consisting of gradient norm (or None if we did not do backward),
+          average perplexity, and the outputs.
+        Raises:
+          ValueError: if length of enconder_inputs, decoder_inputs, or
+            target_weights disagrees with bucket size for the specified bucket_id.
+        """
+        # Check if the sizes match.
+        encoder_size, decoder_size = self.buckets[bucket_id]
+        if len(encoder_inputs) != encoder_size:
+            raise ValueError("Encoder length must be equal to the one in bucket,"
+                             " %d != %d." % (len(encoder_inputs), encoder_size))
+        if len(decoder_inputs) != decoder_size:
+            raise ValueError("Decoder length must be equal to the one in bucket,"
+                             " %d != %d." % (len(decoder_inputs), decoder_size))
+        if len(target_weights) != decoder_size:
+            raise ValueError("Weights length must be equal to the one in bucket,"
+                             " %d != %d." % (len(target_weights), decoder_size))
+
+        # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
+        input_feed = {}
+        for l in xrange(encoder_size):
+            input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+        for l in xrange(decoder_size):
+            input_feed[self.decoder_inputs[l].name] = decoder_inputs[l]
+            input_feed[self.target_weights[l].name] = target_weights[l]
+
+        # Since our targets are decoder inputs shifted by one, we need one more.
+        last_target = self.decoder_inputs[decoder_size].name
+        input_feed[last_target] = numpy.zeros([len(encoder_inputs[0])], dtype=numpy.int32)
+
+        # Output feed: depends on whether we do a backward step or not.
+        if validation_step:
+            input_feed[self.dropout_feed.name] = 0.0
+            output_feed = [self.losses[bucket_id]]  # Loss for this batch.
+
+        else:
+            input_feed[self.dropout_feed.name] = self.dropout
+            output_feed = [self.updates[bucket_id],  # Update Op that does SGD.
+                           self.gradient_norms[bucket_id],  # Gradient norm.
+                           self.losses[bucket_id]]  # Loss for this batch.
+
+        outputs = session.run(output_feed, feed_dict=input_feed)
+
+        # function return: depends on whether we do a backward step or not.
+        if validation_step:
+            # No gradient norm, loss, no outputs.
+            return None, outputs[0], None
+
+        else:
+            # Gradient norm, loss, no outputs.
+            return outputs[1], outputs[2], None
+
+    def get_translate_batch(self, data):
+        """Get a random batch of data from the specified bucket, prepare for step.
+        To feed data in step(..) it must be a list of batch-major vectors, while
+        data here contains single length-major cases. So the main logic of this
+        function is to re-index data cases to be in the proper format for feeding.
+        Args:
+          data: a tuple of size len(self.buckets) in which each element contains
+            lists of pairs of input and output data that we use to create a batch.
+          bucket_id: integer, which bucket to get the batch for.
+        Returns:
+          The triple (encoder_inputs, decoder_inputs, target_weights) for
+          the constructed batch that has the proper format to call step(...) later.
+        """
+        encoder_size, decoder_size = (self.max_len, 1)
+        encoder_inputs, decoder_inputs = [], []
+
+        # Get a random batch of encoder and decoder inputs from data,
+        # pad them if needed, reverse encoder inputs and add GO to decoder.
+        for _ in xrange(self.batch_size):
+            # encoder_input, _, decoder_input = random.choice(d)
+            encoder_input, decoder_input = random.choice(data)
+
+            # Encoder inputs are padded and then reversed.
+            encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
+            encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+
+            # Decoder inputs get an extra "GO" symbol, and are padded then.
+            decoder_pad_size = decoder_size - len(decoder_input) - 1
+            decoder_inputs.append([data_utils.GO_ID] + decoder_input +
+                                  [data_utils.PAD_ID] * decoder_pad_size)
+
+        # Now we create batch-major vectors from the data selected above.
+        batch_encoder_inputs, batch_decoder_inputs = [], []
+
+        # Batch encoder inputs are just re-indexed encoder_inputs.
+        for length_idx in xrange(encoder_size):
+            batch_encoder_inputs.append(
+                numpy.array([encoder_inputs[batch_idx][length_idx]
+                             for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+
+        # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
+        for length_idx in xrange(decoder_size):
+            batch_decoder_inputs.append(
+                numpy.array([decoder_inputs[batch_idx][length_idx]
+                             for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
+
+        return batch_encoder_inputs, batch_decoder_inputs
+
+    def translation_step(self, session, token_ids, beam_size=5, normalize=True, dump_remaining=True):
+
+        sample = []
+        sample_score = []
+
+        live_hyp = 1
+        dead_hyp = 0
+
+        hyp_samples = [[]] * live_hyp
+        hyp_scores = numpy.zeros(live_hyp).astype('float32')
+
+        # Get a 1-element batch to feed the sentence to the model
+        encoder_inputs, decoder_inputs = self.get_translate_batch([(token_ids, [])])
+        decoder_inputs = decoder_inputs[-1]
+
+        # here we encode the input sentence
+        encoder_input_feed = {}
+        for l in xrange(self.max_len):
+            encoder_input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+
+        # we select the last element of ret0 to keep as it is a list of hidden_states
+        encoder_output_feed = [self.ret0[-1], self.ret1, self.ret2]
+
+        # get the return of encoding step: hidden_states, decoder_initial_states, attention_states
+        ret = session.run(encoder_output_feed, encoder_input_feed)
+
+        # here we get info to the decode step
+        attention_states = ret[2]
+        shape = ret[1][0].shape
+        # decoder_init = numpy.tile(ret[1][0].reshape(1, shape[0]), (12, 1))
+        decoder_init = ret[1][0].reshape(1, shape[0])
+        decoder_states = numpy.zeros((1, 1, 1, self.decoder_size))
+
+        # we must retrieve the last state to feed the decoder run
+        decoder_output_feed = [self.logits, self.states, self.decoder_states]
+
+        for ii in xrange(self.max_len):
+
+            session.run(self.step_num.assign(ii + 2))
+
+            # TODO: try to calculate the attention to the decoder here and then feed it
+
+            # we must feed decoder_initial_state and attention_states to run one decode step
+            decoder_input_feed = {self.decoder_inputs[0].name: decoder_inputs,
+                                  self.decoder_init_plcholder.name: decoder_init,
+                                  self.attn_plcholder.name: attention_states}
+            # print ii
+            if self.decoder_attention_f:
+                if ii == 1:
+                    decoder_states = numpy.tile(decoder_states, (12, 1, 1, 1))
+                decoder_input_feed[self.decoder_states_holders.name] = decoder_states
+
+            ret = session.run(decoder_output_feed, decoder_input_feed)
+
+            next_p = ret[0]
+            next_state = ret[1]
+            decoder_states = ret[2]
+
+            cand_scores = hyp_scores[:, None] - numpy.log(next_p)
+            cand_flat = cand_scores.flatten()
+            ranks_flat = cand_flat.argsort()[:(beam_size - dead_hyp)]
+
+            voc_size = next_p.shape[1]
+            trans_indices = ranks_flat / voc_size
+            word_indices = ranks_flat % voc_size
+            costs = cand_flat[ranks_flat]
+
+            new_hyp_samples = []
+            new_hyp_scores = numpy.zeros(beam_size - dead_hyp).astype('float32')
+            new_hyp_states = []
+
+            for idx, [ti, wi] in enumerate(zip(trans_indices, word_indices)):
+                new_hyp_samples.append(hyp_samples[ti] + [wi])
+                new_hyp_scores[idx] = copy.copy(costs[ti])
+                new_hyp_states.append(copy.copy(next_state[ti]))
+
+            # check the finished samples
+            new_live_k = 0
+            hyp_samples = []
+            hyp_scores = []
+            hyp_states = []
+
+            for idx in xrange(len(new_hyp_samples)):
+                if new_hyp_samples[idx][-1] == data_utils.EOS_ID:
+                    sample.append(new_hyp_samples[idx])
+                    sample_score.append(new_hyp_scores[idx])
+                    dead_hyp += 1
+                else:
+                    new_live_k += 1
+                    hyp_samples.append(new_hyp_samples[idx])
+                    hyp_scores.append(new_hyp_scores[idx])
+                    hyp_states.append(new_hyp_states[idx])
+            hyp_scores = numpy.array(hyp_scores)
+            live_hyp = new_live_k
+
+            if new_live_k < 1:
+                break
+            if dead_hyp >= beam_size:
+                break
+
+            decoder_inputs = numpy.array([w[-1] for w in hyp_samples])
+            decoder_init = numpy.array(hyp_states)
+
+        # dump every remaining one
+        if dump_remaining:
+            if live_hyp > 0:
+                for idx in xrange(live_hyp):
+                    sample.append(hyp_samples[idx])
+                    sample_score.append(hyp_scores[idx])
+
+        # normalize scores according to sequence lengths
+        if normalize:
+            lengths = numpy.array([len(s) for s in sample])
+            sample_score = sample_score / lengths
+
+        # sort the samples by score (it is in log-scale, therefore lower is better)
+        sidx = numpy.argsort(sample_score)
+        sample = numpy.array(sample)[sidx]
+        sample_score = numpy.array(sample_score)[sidx]
+
+        return sample.tolist(), sample_score.tolist()
+
+
+class Seq2SeqModel(TranslationModel):
     """Sequence-to-sequence model with attention and for multiple buckets.
     This class implements a multi-layer recurrent neural network as encoder,
     and an attention-based decoder. This is the same as the model described in
@@ -147,6 +478,7 @@ class Seq2SeqModel(object):
         Args:
 
         """
+        super(Seq2SeqModel, self).__init__()
         assert decoder is not None
 
         if cpu_only:
@@ -229,8 +561,11 @@ class Seq2SeqModel(object):
                 b = tf.get_variable("proj_b", [self.target_vocab_size])
             self.output_projection = (w, b)
 
+            self.sampled_softmax = False
+
             # Sampled softmax only makes sense if we sample less than vocabulary size.
             if 0 < num_samples < self.target_vocab_size:
+                self.sampled_softmax = True
                 def sampled_loss(inputs, labels):
                     with tf.device("/cpu:0"):
                         labels = tf.reshape(labels, [-1, 1])
@@ -395,9 +730,12 @@ class Seq2SeqModel(object):
             num_symbols=self.target_vocab_size, attention_f=self.attention_f,
             window_size=self.window_size,  content_function=self.content_function,
             decoder_attention_f=self.decoder_attention_f, combine_inp_attn=self.combine_inp_attn,
-            input_feeding=self.input_feeding,  dropout=self.dropout_feed,
+            input_feeding=self.input_feeding, dropout=self.dropout_feed,
             initializer=None, decoder_states=None, step_num=self.step_num, dtype=self.dtype
         )
+
+        if self.sampled_softmax is False:
+            outputs = [tf.nn.xw_plus_b(o, self.output_projection[0], self.output_projection[1]) for o in outputs]
 
         # return the output (logits) and internal states
         return outputs, state
@@ -421,309 +759,8 @@ class Seq2SeqModel(object):
 
         return context, decoder_initial_state, attention_states
 
-    def get_train_batch(self, data, bucket_id, batch=None):
-        """Get a random batch of data from the specified bucket, prepare for step.
-        To feed data in step(..) it must be a list of batch-major vectors, while
-        data here contains single length-major cases. So the main logic of this
-        function is to re-index data cases to be in the proper format for feeding.
-        Args:
-          data: a tuple of size len(self.buckets) in which each element contains
-            lists of pairs of input and output data that we use to create a batch.
-          bucket_id: integer, which bucket to get the batch for.
-        Returns:
-          The triple (encoder_inputs, decoder_inputs, target_weights) for
-          the constructed batch that has the proper format to call step(...) later.
-        """
-        encoder_size, decoder_size = self.buckets[bucket_id]
-        encoder_inputs, decoder_inputs = [], []
 
-        n_target_words = 0
-
-        if batch is None:
-            batch = self.batch_size
-
-        # Get a random batch of encoder and decoder inputs from data,
-        # pad them if needed, reverse encoder inputs and add GO to decoder.
-        for _ in xrange(batch):
-            # encoder_input, _, decoder_input = random.choice(d)
-            encoder_input, decoder_input = random.choice(data[bucket_id])
-
-            # Encoder inputs are padded and then reversed.
-            encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
-            encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
-
-            n_target_words += len(decoder_input)
-
-            # Decoder inputs get an extra "GO" symbol, and are padded then.
-            decoder_pad_size = decoder_size - len(decoder_input) - 1
-            decoder_inputs.append([data_utils.GO_ID] + decoder_input +
-                                  [data_utils.PAD_ID] * decoder_pad_size)
-
-        # Now we create batch-major vectors from the data selected above.
-        batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
-
-        # Batch encoder inputs are just re-indexed encoder_inputs.
-        for length_idx in xrange(encoder_size):
-            batch_encoder_inputs.append(
-                    numpy.array([encoder_inputs[batch_idx][length_idx]
-                              for batch_idx in xrange(batch)], dtype=numpy.int32))
-
-        # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
-        for length_idx in xrange(decoder_size):
-            batch_decoder_inputs.append(
-                    numpy.array([decoder_inputs[batch_idx][length_idx]
-                              for batch_idx in xrange(batch)], dtype=numpy.int32))
-
-            # Create target_weights to be 0 for targets that are padding.
-            # batch_weight = numpy.ones(self.batch_size, dtype=numpy.float32)
-            batch_weight = numpy.ones(batch, dtype=numpy.float32)
-            # for batch_idx in xrange(self.batch_size):
-            for batch_idx in xrange(batch):
-                # We set weight to 0 if the corresponding target is a PAD symbol.
-                # The corresponding target is decoder_input shifted by 1 forward.
-                if length_idx < decoder_size - 1:
-                    target = decoder_inputs[batch_idx][length_idx + 1]
-                if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
-                    batch_weight[batch_idx] = 0.0
-            batch_weights.append(batch_weight)
-
-        return batch_encoder_inputs, batch_decoder_inputs, batch_weights, n_target_words
-
-    def train_step(self, session, encoder_inputs, decoder_inputs, target_weights, bucket_id, validation_step=False):
-        """Run a step of the model feeding the given inputs.
-        Args:
-          session: tensorflow session to use.
-          encoder_inputs: list of numpy int vectors to feed as encoder inputs.
-          decoder_inputs: list of numpy int vectors to feed as decoder inputs.
-          target_weights: list of numpy float vectors to feed as target weights.
-          bucket_id: which bucket of the model to use.
-          validation_step: whether to do the backward step or only forward.
-          softmax: whether to apply softmax to the output_logits before returning them
-        Returns:
-          A triple consisting of gradient norm (or None if we did not do backward),
-          average perplexity, and the outputs.
-        Raises:
-          ValueError: if length of enconder_inputs, decoder_inputs, or
-            target_weights disagrees with bucket size for the specified bucket_id.
-        """
-        # Check if the sizes match.
-        encoder_size, decoder_size = self.buckets[bucket_id]
-        if len(encoder_inputs) != encoder_size:
-            raise ValueError("Encoder length must be equal to the one in bucket,"
-                             " %d != %d." % (len(encoder_inputs), encoder_size))
-        if len(decoder_inputs) != decoder_size:
-            raise ValueError("Decoder length must be equal to the one in bucket,"
-                             " %d != %d." % (len(decoder_inputs), decoder_size))
-        if len(target_weights) != decoder_size:
-            raise ValueError("Weights length must be equal to the one in bucket,"
-                             " %d != %d." % (len(target_weights), decoder_size))
-
-        # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
-        input_feed = {}
-        for l in xrange(encoder_size):
-            input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
-        for l in xrange(decoder_size):
-            input_feed[self.decoder_inputs[l].name] = decoder_inputs[l]
-            input_feed[self.target_weights[l].name] = target_weights[l]
-
-        # Since our targets are decoder inputs shifted by one, we need one more.
-        last_target = self.decoder_inputs[decoder_size].name
-        input_feed[last_target] = numpy.zeros([len(encoder_inputs[0])], dtype=numpy.int32)
-
-        # Output feed: depends on whether we do a backward step or not.
-        if validation_step:
-            input_feed[self.dropout_feed.name] = 0.0
-            output_feed = [self.losses[bucket_id]]  # Loss for this batch.
-
-        else:
-            input_feed[self.dropout_feed.name] = self.dropout
-            output_feed = [self.updates[bucket_id],  # Update Op that does SGD.
-                           self.gradient_norms[bucket_id],  # Gradient norm.
-                           self.losses[bucket_id]]  # Loss for this batch.
-
-        outputs = session.run(output_feed, feed_dict=input_feed)
-
-        # function return: depends on whether we do a backward step or not.
-        if validation_step:
-            # No gradient norm, loss, no outputs.
-            return None, outputs[0], None
-
-        else:
-            # Gradient norm, loss, no outputs.
-            return outputs[1], outputs[2], None
-
-    def get_translate_batch(self, data):
-        """Get a random batch of data from the specified bucket, prepare for step.
-        To feed data in step(..) it must be a list of batch-major vectors, while
-        data here contains single length-major cases. So the main logic of this
-        function is to re-index data cases to be in the proper format for feeding.
-        Args:
-          data: a tuple of size len(self.buckets) in which each element contains
-            lists of pairs of input and output data that we use to create a batch.
-          bucket_id: integer, which bucket to get the batch for.
-        Returns:
-          The triple (encoder_inputs, decoder_inputs, target_weights) for
-          the constructed batch that has the proper format to call step(...) later.
-        """
-        encoder_size, decoder_size = (self.max_len, 1)
-        encoder_inputs, decoder_inputs = [], []
-
-        # Get a random batch of encoder and decoder inputs from data,
-        # pad them if needed, reverse encoder inputs and add GO to decoder.
-        for _ in xrange(self.batch_size):
-            # encoder_input, _, decoder_input = random.choice(d)
-            encoder_input, decoder_input = random.choice(data)
-
-            # Encoder inputs are padded and then reversed.
-            encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
-            encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
-
-            # Decoder inputs get an extra "GO" symbol, and are padded then.
-            decoder_pad_size = decoder_size - len(decoder_input) - 1
-            decoder_inputs.append([data_utils.GO_ID] + decoder_input +
-                                  [data_utils.PAD_ID] * decoder_pad_size)
-
-        # Now we create batch-major vectors from the data selected above.
-        batch_encoder_inputs, batch_decoder_inputs = [], []
-
-        # Batch encoder inputs are just re-indexed encoder_inputs.
-        for length_idx in xrange(encoder_size):
-            batch_encoder_inputs.append(
-                    numpy.array([encoder_inputs[batch_idx][length_idx]
-                              for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
-
-        # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
-        for length_idx in xrange(decoder_size):
-            batch_decoder_inputs.append(
-                    numpy.array([decoder_inputs[batch_idx][length_idx]
-                              for batch_idx in xrange(self.batch_size)], dtype=numpy.int32))
-
-        return batch_encoder_inputs, batch_decoder_inputs
-
-    def translation_step(self, session, token_ids, beam_size=5, normalize=True, dump_remaining=True):
-
-        sample = []
-        sample_score = []
-
-        live_hyp = 1
-        dead_hyp = 0
-
-        hyp_samples = [[]] * live_hyp
-        hyp_scores = numpy.zeros(live_hyp).astype('float32')
-
-        # Get a 1-element batch to feed the sentence to the model
-        encoder_inputs, decoder_inputs = self.get_translate_batch([(token_ids, [])])
-        decoder_inputs = decoder_inputs[-1]
-
-        # here we encode the input sentence
-        encoder_input_feed = {}
-        for l in xrange(self.max_len):
-            encoder_input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
-
-        # we select the last element of ret0 to keep as it is a list of hidden_states
-        encoder_output_feed = [self.ret0[-1], self.ret1, self.ret2]
-
-        # get the return of encoding step: hidden_states, decoder_initial_states, attention_states
-        ret = session.run(encoder_output_feed, encoder_input_feed)
-
-        # here we get info to the decode step
-        attention_states = ret[2]
-        shape = ret[1][0].shape
-        # decoder_init = numpy.tile(ret[1][0].reshape(1, shape[0]), (12, 1))
-        decoder_init = ret[1][0].reshape(1, shape[0])
-        decoder_states = numpy.zeros((1, 1, 1, self.decoder_size))
-
-        # we must retrieve the last state to feed the decoder run
-        decoder_output_feed = [self.logits, self.states, self.decoder_states]
-
-        for ii in xrange(self.max_len):
-
-            session.run(self.step_num.assign(ii+2))
-
-            # TODO: try to calculate the attention to the decoder here and then feed it
-
-            # we must feed decoder_initial_state and attention_states to run one decode step
-            decoder_input_feed = {self.decoder_inputs[0].name : decoder_inputs,
-                                  self.decoder_init_plcholder.name: decoder_init,
-                                  self.attn_plcholder.name: attention_states}
-            # print ii
-            if self.decoder_attention_f:
-                if ii == 1:
-                    decoder_states = numpy.tile(decoder_states, (12, 1, 1, 1))
-                decoder_input_feed[self.decoder_states_holders.name] = decoder_states
-
-            ret = session.run(decoder_output_feed, decoder_input_feed)
-
-            next_p = ret[0]
-            next_state = ret[1]
-            decoder_states = ret[2]
-
-            cand_scores = hyp_scores[:, None] - numpy.log(next_p)
-            cand_flat = cand_scores.flatten()
-            ranks_flat = cand_flat.argsort()[:(beam_size-dead_hyp)]
-
-            voc_size = next_p.shape[1]
-            trans_indices = ranks_flat / voc_size
-            word_indices = ranks_flat % voc_size
-            costs = cand_flat[ranks_flat]
-
-            new_hyp_samples = []
-            new_hyp_scores = numpy.zeros(beam_size-dead_hyp).astype('float32')
-            new_hyp_states = []
-
-            for idx, [ti, wi] in enumerate(zip(trans_indices, word_indices)):
-                new_hyp_samples.append(hyp_samples[ti]+[wi])
-                new_hyp_scores[idx] = copy.copy(costs[ti])
-                new_hyp_states.append(copy.copy(next_state[ti]))
-
-            # check the finished samples
-            new_live_k = 0
-            hyp_samples = []
-            hyp_scores = []
-            hyp_states = []
-
-            for idx in xrange(len(new_hyp_samples)):
-                if new_hyp_samples[idx][-1] == data_utils.EOS_ID:
-                    sample.append(new_hyp_samples[idx])
-                    sample_score.append(new_hyp_scores[idx])
-                    dead_hyp += 1
-                else:
-                    new_live_k += 1
-                    hyp_samples.append(new_hyp_samples[idx])
-                    hyp_scores.append(new_hyp_scores[idx])
-                    hyp_states.append(new_hyp_states[idx])
-            hyp_scores = numpy.array(hyp_scores)
-            live_hyp = new_live_k
-
-            if new_live_k < 1:
-                break
-            if dead_hyp >= beam_size:
-                break
-
-            decoder_inputs = numpy.array([w[-1] for w in hyp_samples])
-            decoder_init = numpy.array(hyp_states)
-
-        # dump every remaining one
-        if dump_remaining:
-            if live_hyp > 0:
-                for idx in xrange(live_hyp):
-                    sample.append(hyp_samples[idx])
-                    sample_score.append(hyp_scores[idx])
-
-        # normalize scores according to sequence lengths
-        if normalize:
-            lengths = numpy.array([len(s) for s in sample])
-            sample_score = sample_score / lengths
-
-        # sort the samples by score (it is in log-scale, therefore lower is better)
-        sidx = numpy.argsort(sample_score)
-        sample = numpy.array(sample)[sidx]
-        sample_score = numpy.array(sample_score)[sidx]
-
-        return sample.tolist(), sample_score.tolist()
-
-
-class NMTModel(object):
+class NMTModel(TranslationModel):
 
     def __init__(self,
                  source_vocab_size,
@@ -752,6 +789,7 @@ class NMTModel(object):
                  early_stop_patience=0,
                  save_best_model=True,
                  dtype=tf.float32):
+        super(NMTModel, self).__init__()
 
         if cpu_only:
             device = "/cpu:0"
@@ -831,8 +869,11 @@ class NMTModel(object):
                 b = tf.get_variable("proj_b", [self.target_vocab_size])
             self.output_projection = (w, b)
 
+            self.sampled_softmax = False
+
             # Sampled softmax only makes sense if we sample less than vocabulary size.
             if 0 < num_samples < self.target_vocab_size:
+                self.sampled_softmax = True
                 def sampled_loss(inputs, labels):
                     with tf.device("/cpu:0"):
                         labels = tf.reshape(labels, [-1, 1])
@@ -998,6 +1039,9 @@ class NMTModel(object):
             input_feeding=self.input_feeding, dropout=self.dropout_feed,
             initializer=None, dtype=self.dtype
         )
+
+        if self.sampled_softmax is False:
+            outputs = [tf.nn.xw_plus_b(o, self.output_projection[0], self.output_projection[1]) for o in outputs]
 
         # return the output (logits) and internal states
         return outputs, state

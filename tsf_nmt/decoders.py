@@ -2,13 +2,14 @@
 from __future__ import division
 from __future__ import print_function
 import tensorflow as tf
-import cells
-from attention import global_attention
-from content_functions import decoder_type_2, vinyals_kaiser, mod_bahdanau
+
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops, embedding_ops, math_ops, nn_ops
 from tensorflow.python.ops import variable_scope as vs
 
+import cells
+from attention import global_attention
+from content_functions import decoder_type_2, vinyals_kaiser, mod_bahdanau
 # from six.moves import xrange
 
 _SEED = 1234

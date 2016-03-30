@@ -91,7 +91,7 @@ flags.DEFINE_string('source_lang', 'en', 'Source language extension.')
 flags.DEFINE_string('target_lang', 'pt', 'Target language extension.')
 
 # verbosity and checkpoints
-flags.DEFINE_integer('steps_per_checkpoint', 100, 'How many training steps to do per checkpoint.')
+flags.DEFINE_integer('steps_per_checkpoint', 250, 'How many training steps to do per checkpoint.')
 flags.DEFINE_integer('steps_per_validation', 1000, 'How many training steps to do between each validation.')
 flags.DEFINE_integer('steps_verbosity', 10, 'How many training steps to do between each information print.')
 

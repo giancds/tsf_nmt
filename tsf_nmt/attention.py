@@ -2,11 +2,11 @@
 from __future__ import division
 from __future__ import print_function
 import tensorflow as tf
-import cells
-from content_functions import vinyals_kaiser
 from tensorflow.python.ops import array_ops, math_ops, nn_ops
 from tensorflow.python.ops import variable_scope as vs
 
+import cells
+from content_functions import vinyals_kaiser
 
 GLOBAL = "global"
 LOCAL = "local"

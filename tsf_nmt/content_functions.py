@@ -2,10 +2,10 @@
 from __future__ import division
 from __future__ import print_function
 
-import cells
 from tensorflow.python.ops import array_ops, math_ops, nn_ops
 from tensorflow.python.ops import variable_scope as vs
 
+import cells
 
 VINYALS_KAISER = 'vinyals_kayser'
 LUONG_GENERAL = 'luong_general'

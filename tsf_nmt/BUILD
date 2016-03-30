@@ -111,6 +111,7 @@ py_library(
     ],
     srcs_version = "PY2AND3",
     deps = [
+    ":cells",
     ],
 )
 
@@ -125,6 +126,7 @@ py_library(
         ":cells",
         ":data_utils",
         ":encoders",
+        ":decoders",
         ":optimization_ops",
     ],
 )
@@ -139,7 +141,6 @@ py_library(
     deps = [
     ],
 )
-
 
 # train_ops.py
 py_library(
@@ -167,11 +168,38 @@ py_library(
     ],
 )
 
-### BINARY ###
+### BINARIES ###
 py_binary(
     name = "translate_global_attention",
     srcs = [
         "translate_global_attention.py",
+    ],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":attention",
+        ":content_functions",
+        ":train_ops",
+        ":translate_ops",
+    ],
+)
+
+py_binary(
+    name = "translate_local_attention",
+    srcs = [
+        "translate_local_attention.py",
+    ],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":attention",
+        ":content_functions",
+        ":train_ops",
+        ":translate_ops",
+    ],
+)
+py_binary(
+    name = "translate_hybrid_attention",
+    srcs = [
+        "translate_hybrid_attention.py",
     ],
     srcs_version = "PY2AND3",
     deps = [

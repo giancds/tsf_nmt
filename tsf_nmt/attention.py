@@ -78,6 +78,8 @@ def hybrid_attention(decoder_hidden_state, hidden_attn, initializer, window_size
         tanh = math_ops.tanh(y)
         beta = math_ops.sigmoid(math_ops.reduce_sum((vb * tanh), [2, 3]))
 
+        _ = tf.histogram_summary('hybrid_beta_weights', beta)
+
         attns = beta * global_attn + (1 - beta) * local_attn
 
     return attns
@@ -125,11 +127,15 @@ def global_attention(decoder_hidden_state, hidden_attn, initializer, window_size
         # apply content function to score the hidden states from the encoder
         s = content_function(hidden_attn, decoder_hidden_state)
 
-        a = nn_ops.softmax(s)
+        alpha = nn_ops.softmax(s)
+
+        _ = tf.histogram_summary('global_alpha_weights', alpha)
 
         # Now calculate the attention-weighted vector d.
-        d = math_ops.reduce_sum(array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden_attn, [1, 2])
-        ds = array_ops.reshape(d, [-1, attention_vec_size])
+        d = math_ops.reduce_sum(array_ops.reshape(alpha, [-1, attn_length, 1, 1]) * hidden_attn, [1, 2])
+        ds = array_ops.reshape(d, [-1, attention_vec_size])#
+
+    _ = tf.histogram_summary('global_attention_context', ds)
 
     return ds
 
@@ -196,6 +202,8 @@ def local_attention(decoder_hidden_state, hidden_attn, initializer, window_size=
         # now we get only the integer part of the values
         pt = tf.floor(pt)
 
+        _ = tf.histogram_summary('local_window_predictions', pt)
+
         # we now create a tensor containing the indices representing each position
         # of the sentence - i.e., if the sentence contain 5 tokens and batch_size is 3,
         # the resulting tensor will be:
@@ -228,8 +236,10 @@ def local_attention(decoder_hidden_state, hidden_attn, initializer, window_size=
 
         # here we switch off all the values that fall outside the window
         # first we switch off those in the truncated normal
-        a = s * mask
-        masked_soft = nn_ops.softmax(a)
+        alpha = s * mask
+        masked_soft = nn_ops.softmax(alpha)
+
+        _ = tf.histogram_summary('local_alpha_weights', alpha)
 
         # here we calculate the 'truncated normal distribution'
         numerator = -tf.pow((idx - pt), tf.convert_to_tensor(2, dtype=dtype))
@@ -243,5 +253,7 @@ def local_attention(decoder_hidden_state, hidden_attn, initializer, window_size=
                 array_ops.reshape(at, [-1, attn_length, 1, 1]) * hidden_attn,
                 [1, 2])
         ds = array_ops.reshape(d, [-1, attention_vec_size])
+
+    _ = tf.histogram_summary('local_attention_context', ds)
 
     return ds

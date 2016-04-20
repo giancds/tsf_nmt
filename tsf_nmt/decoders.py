@@ -126,6 +126,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, cell, num
     if initializer is None:
         initializer = tf.random_uniform_initializer(minval=-0.1, maxval=0.1, seed=_SEED)
 
+        tf.name_scope()
+
     with vs.variable_scope(scope or "embedding_attention_decoder", initializer=initializer):
 
         emb_inp = _embed_inputs(decoder_inputs, num_symbols, cell.input_size, input_feeding=input_feeding)
@@ -592,6 +594,8 @@ def decoder_output_attention(decoder_hidden, attn_size, decoder_attention_f, ini
         # d will be (?, decoder_size)
         ds = tf.reshape(d, [-1, attn_size])
 
+    _ = tf.histogram_summary('attention_decoder_context', ds)
+
     # ds is (?, decoder_size)
     return ds
 
@@ -805,6 +809,7 @@ def attention_decoder_output_informed(decoder_inputs, initial_state, attention_s
         cell_outputs = decoder_states
 
     return outputs, cell_state, cell_outputs
+
 
 def attention_decoder_nmt(decoder_inputs, initial_state, attention_states, cell, num_symbols,
                           attention_f=global_attention, window_size=10, content_function=vinyals_kaiser,

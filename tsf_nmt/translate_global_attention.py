@@ -41,6 +41,8 @@ from translate_ops import decode_from_stdin, decode_from_file
 
 flags = tf.flags
 
+# TODO: include more scope names over the model to make it easier to visualise on Tensorboard
+
 # flags related to the model optimization
 flags.DEFINE_float('learning_rate', 0.0001, 'Learning rate.')
 flags.DEFINE_float('learning_rate_decay_factor', 1.0, 'Learning rate decays by this much. Setting it to 1.0 will not affect the learning rate.')
@@ -53,9 +55,8 @@ flags.DEFINE_integer('batch_size', 32, 'Batch size to use during training.')
 flags.DEFINE_integer('beam_size', 12, 'Max size of the beam used for decoding.')
 flags.DEFINE_integer('num_samples_loss', 512, 'Number of samples to use in sampled softmax. Set to 0 to use regular loss.')
 flags.DEFINE_integer('max_len', 120, 'Max size of the beam used for decoding.')
-flags.DEFINE_integer('max_epochs', 23,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
+flags.DEFINE_integer('max_epochs', 20,  'Max number of epochs to use during training. The actual value will be (max_epochs-1) as it is 0-based.')
 flags.DEFINE_integer('max_train_data_size', 0, 'Limit on the size of training data (0: no limit).')
-
 flags.DEFINE_boolean('cpu_only', False, 'Whether or not to use GPU only.')
 
 # flags related to model architecture
@@ -91,9 +92,10 @@ flags.DEFINE_string('source_lang', 'en', 'Source language extension.')
 flags.DEFINE_string('target_lang', 'pt', 'Target language extension.')
 
 # verbosity and checkpoints
-flags.DEFINE_integer('steps_per_checkpoint', 250, 'How many training steps to do per checkpoint.')
+flags.DEFINE_integer('steps_per_checkpoint', 500, 'How many training steps to do per checkpoint.')
 flags.DEFINE_integer('steps_per_validation', 1000, 'How many training steps to do between each validation.')
 flags.DEFINE_integer('steps_verbosity', 10, 'How many training steps to do between each information print.')
+flags.DEFINE_boolean('log_tensorboard', False, 'Whether or not to use Tensorboard to log info about training. Default to False.')
 
 # pacience flags (learning_rate decay and early stop)
 flags.DEFINE_integer('lr_rate_patience', 3, 'How many training steps to monitor.')
@@ -133,3 +135,6 @@ def main(_):
 
 if __name__ == '__main__':
     tf.app.run()
+    import kenlm
+    a = kenlm.Model()
+    a.scattore

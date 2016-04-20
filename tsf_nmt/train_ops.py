@@ -51,7 +51,7 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
         train_bucket_sizes = [len(train_set[b]) for b in xrange(len(buckets))]
         train_total_size = float(sum(train_bucket_sizes))
 
-        print("Total number of updates per epoch: %d" % (train_total_size / FLAGS.batch_size))
+        print("Total number of steps per epoch: %d" % (train_total_size / FLAGS.batch_size))
 
         # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
         # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
@@ -63,6 +63,10 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
         step_time = 0.0
         words_time = 0.0
         n_target_words = 0
+
+        summary_writer = None
+        if FLAGS.log_tensorboard:
+            summary_writer = tf.train.SummaryWriter(FLAGS.train_dir, sess.graph_def)
 
         print("Optimization started...")
         while model.epoch.eval() < FLAGS.max_epochs:
@@ -91,6 +95,13 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
                                                            target_weights=target_weights,
                                                            bucket_id=bucket_id,
                                                            validation_step=False)
+
+            current_step = model.global_step.eval()
+
+            if summary_writer is not None:
+                summary_str = sess.run(model.summary_op)
+                summary_writer.add_summary(summary_str, current_step)
+
             # step_loss = numpy.nan
 
             if numpy.isnan(step_loss) or numpy.isinf(step_loss):
@@ -122,8 +133,6 @@ def train_nmt(FLAGS=None, buckets=None, save_before_training=False):
 
             # increase the number of seen samples
             sess.run(model.samples_seen_update_op)
-
-            current_step = model.global_step.eval()
 
             if current_step % FLAGS.steps_verbosity == 0:
 

@@ -346,17 +346,17 @@ class TranslationModel(object):
 
             session.run(self.step_num.assign(ii + 2))
 
-            # TODO: try to calculate the attention to the decoder here and then feed it
-
             # we must feed decoder_initial_state and attention_states to run one decode step
             decoder_input_feed = {self.decoder_inputs[0].name: decoder_inputs,
                                   self.decoder_init_plcholder.name: decoder_init,
                                   self.attn_plcholder.name: attention_states}
             # print ii
             if self.decoder_attention_f:
-                if ii == 1:
-                    decoder_states = numpy.tile(decoder_states, (12, 1, 1, 1))
+                # if ii == 1:
+                #     decoder_states = numpy.tile(decoder_states, (12, 1, 1, 1))
                 decoder_input_feed[self.decoder_states_holders.name] = decoder_states
+
+                # print "Step %d - States shape %s - Input shape %s" % (ii, decoder_states.shape, decoder_inputs.shape)
 
             ret = session.run(decoder_output_feed, decoder_input_feed)
 
@@ -376,17 +376,20 @@ class TranslationModel(object):
             new_hyp_samples = []
             new_hyp_scores = numpy.zeros(beam_size - dead_hyp).astype('float32')
             new_hyp_states = []
+            new_dec_states = []
 
             for idx, [ti, wi] in enumerate(zip(trans_indices, word_indices)):
                 new_hyp_samples.append(hyp_samples[ti] + [wi])
                 new_hyp_scores[idx] = copy.copy(costs[ti])
                 new_hyp_states.append(copy.copy(next_state[ti]))
+                new_dec_states.append(copy.copy(decoder_states[ti]))
 
             # check the finished samples
             new_live_k = 0
             hyp_samples = []
             hyp_scores = []
             hyp_states = []
+            dec_states = []
 
             for idx in xrange(len(new_hyp_samples)):
                 if new_hyp_samples[idx][-1] == data_utils.EOS_ID:
@@ -398,6 +401,11 @@ class TranslationModel(object):
                     hyp_samples.append(new_hyp_samples[idx])
                     hyp_scores.append(new_hyp_scores[idx])
                     hyp_states.append(new_hyp_states[idx])
+                    dec_states.append(new_dec_states[idx])
+
+            dec_states = [d.reshape(1, d.shape[0], d.shape[1], d.shape[2]) for d in dec_states]
+            dec_states = numpy.concatenate(dec_states, axis=0)
+
             hyp_scores = numpy.array(hyp_scores)
             live_hyp = new_live_k
 
@@ -408,6 +416,7 @@ class TranslationModel(object):
 
             decoder_inputs = numpy.array([w[-1] for w in hyp_samples])
             decoder_init = numpy.array(hyp_states)
+            decoder_states = dec_states
 
         # dump every remaining one
         if dump_remaining:
@@ -473,6 +482,7 @@ class Seq2SeqModel(TranslationModel):
                  cpu_only=False,
                  early_stop_patience=0,
                  save_best_model=True,
+                 log_tensorboard=False,
                  dtype=tf.float32):
         """Create the model.
         Args:
@@ -634,9 +644,17 @@ class Seq2SeqModel(TranslationModel):
                 # context, decoder_initial_state, attention_states, input_length
                 self.ret0, self.ret1, self.ret2 = self.encode(self.encoder_inputs, b_size)
 
-                self.decoder_init_plcholder = tf.placeholder(tf.float32,
-                                                         shape=[None, (target_proj_size) * 2 * num_layers_decoder],
-                                                         name="decoder_init")
+                if use_lstm:
+
+                    self.decoder_init_plcholder = tf.placeholder(tf.float32,
+                                                             shape=[None, (target_proj_size) * 2 * num_layers_decoder],
+                                                             name="decoder_init")
+                else:
+
+                    # GRU has hidden state with half the size of the LSTM because it does noe have a memory cell
+                    self.decoder_init_plcholder = tf.placeholder(tf.float32,
+                                                             shape=[None, (target_proj_size) * num_layers_decoder],
+                                                             name="decoder_init")
 
                 # shape of this placeholder: the first None indicate the batch size and the second the input length
                 self.attn_plcholder = tf.placeholder(tf.float32,
@@ -686,11 +704,13 @@ class Seq2SeqModel(TranslationModel):
             if not forward_only:
                 self.gradient_norms = []
                 self.updates = []
+                self.gradients = []
                 # opt = tf.train.GradientDescentOptimizer(self.learning_rate)
                 opt = optimization_ops.get_optimizer(optimizer, learning_rate)
                 for b in xrange(len(buckets)):
-                    gradients = tf.gradients(self.losses[b], params)
-                    clipped_gradients, norm = tf.clip_by_global_norm(gradients,
+                    grads = tf.gradients(self.losses[b], params)
+                    self.gradients.append(grads)
+                    clipped_gradients, norm = tf.clip_by_global_norm(grads,
                                                                      max_gradient_norm)
                     self.gradient_norms.append(norm)
                     self.updates.append(opt.apply_gradients(
@@ -698,6 +718,23 @@ class Seq2SeqModel(TranslationModel):
 
             self.saver = tf.train.Saver(tf.all_variables())
             self.saver_best = tf.train.Saver(tf.all_variables())
+
+            if log_tensorboard:
+
+                # include everything to log here:
+                _ = tf.histogram_summary('W_output_proj', self.output_projection[0])
+                _ = tf.histogram_summary('b_output_proj', self.output_projection[1])
+
+                _ = tf.histogram_summary('logits', self.outputs)
+
+                for b in xrange(len(buckets)):
+                    _ = tf.histogram_summary('gradient_norm_bucket_{0}'.format(b), self.gradient_norms[b])
+                    _ = tf.histogram_summary('update_bucket_{0}'.format(b), self.updates[b])
+                    _ = tf.histogram_summary('gradient_bucket_{0}'.format(b), self.gradients[b])
+                    _ = tf.scalar_summary('loss_bucket_{0}', self.losses[b])
+
+                # merge the summary ops into one big op
+                self.summary_op = tf.merge_all_summaries()
 
     def inference(self, source, target):
         """

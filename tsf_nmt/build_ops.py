@@ -75,7 +75,8 @@ def create_seq2seq_model(session, forward_only, model_path=None, use_best=False,
                                     max_len=FLAGS.max_len,
                                     cpu_only=FLAGS.cpu_only,
                                     early_stop_patience=FLAGS.early_stop_patience,
-                                    save_best_model=FLAGS.save_best_model)
+                                    save_best_model=FLAGS.save_best_model,
+                                    log_tensorboard=FLAGS.log_tensorboard)
 
     if model_path is None:
 

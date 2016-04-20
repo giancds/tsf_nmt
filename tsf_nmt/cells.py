@@ -182,7 +182,7 @@ def linear(args, output_size, bias, bias_start=0.0, initializer=None, scope=None
     Raises:
       ValueError: if some of the arguments has unspecified or wrong shape.
     """
-    assert args
+    assert args is not None
     if not isinstance(args, (list, tuple)):
         args = [args]
 
@@ -299,21 +299,19 @@ def build_nmt_multicell_rnn(num_layers_encoder, num_layers_decoder, encoder_size
         else:
             decoder_cell0 = cell_class(num_units=decoder_size, input_size=decoder_size, initializer=initializer)
 
-        decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size, initializer=initializer)
-
         # if dropout > 0.0:  # if dropout is 0.0, it is turned off
-        encoder_cell = rnn_cell.DropoutWrapper(encoder_cell,
-                                               output_keep_prob=1.0 - dropout)
-
-        decoder_cell0 = rnn_cell.DropoutWrapper(decoder_cell0,
-                                                output_keep_prob=1.0 - dropout)
-
-        decoder_cell1 = rnn_cell.DropoutWrapper(decoder_cell1,
-                                                output_keep_prob=1.0 - dropout)
-
+        encoder_cell = rnn_cell.DropoutWrapper(encoder_cell, output_keep_prob=1.0 - dropout)
         encoder_rnncell = rnn_cell.MultiRNNCell([encoder_cell] * num_layers_encoder)
 
-        decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell0] + [decoder_cell1] * (num_layers_decoder - 1))
+        decoder_cell0 = rnn_cell.DropoutWrapper(decoder_cell0, output_keep_prob=1.0 - dropout)
+        if num_layers_decoder > 1:
+            decoder_cell1 = cell_class(num_units=decoder_size, input_size=decoder_size, initializer=initializer)
+            decoder_cell1 = rnn_cell.DropoutWrapper(decoder_cell1, output_keep_prob=1.0 - dropout)
+            decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell0] + [decoder_cell1] * (num_layers_decoder - 1))
+
+        else:
+
+            decoder_rnncell = rnn_cell.MultiRNNCell([decoder_cell0])
 
         return encoder_rnncell, decoder_rnncell
 

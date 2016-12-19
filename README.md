@@ -1,3 +1,8 @@
+## Given that I haven't been working on this project for a while and Tensorflow is under havy development, my code got oudated. I'm planning to restart working on it at early January (2017). If you're insterestd on it, please check it again later on Jnauary, 2017. 
+
+## Thanks.
+
+
 These are my experiments re-implementing the "Effective Approaches to Attention-based Neural Machine Translation" 
 paper by [Luong et al. (2015)](http://arxiv.org/abs/1508.04025)
 
